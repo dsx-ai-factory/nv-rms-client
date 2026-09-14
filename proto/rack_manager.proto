@@ -1216,6 +1216,7 @@ message ApplyStoredSwitchSystemImageRequest {
   string software_type = 4; // "dev" or "prod"
   string hardware_type = 5;
   NodeSet nodes = 6; // Caller-supplied switch nodes
+  optional bool allow_onie_recovery = 7;
 }
 
 message ApplyStoredSwitchSystemImageResponse {
@@ -1232,6 +1233,7 @@ message ApplySwitchSystemImageRequest {
   string software_type = 5; // "dev" or "prod"
   string hardware_type = 6;
   NodeSet nodes = 7; // Caller-supplied switch nodes
+  optional bool allow_onie_recovery = 8;
 }
 
 message ApplySwitchSystemImageResponse {

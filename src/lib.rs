@@ -73,6 +73,7 @@ mod proto_model_tests {
     use prost::Message as _;
 
     use super::protos::rack_manager::{
+        ApplyStoredSwitchSystemImageRequest, ApplySwitchSystemImageRequest,
         BatchGetFirmwareInventoryRequest, CompareFirmwareObjectRequest, Endpoint,
         FirmwareComparisonStatus, NetworkInterface, NodeInfo, NodeSet, NodeType,
     };
@@ -154,6 +155,35 @@ mod proto_model_tests {
         );
 
         Ok(())
+    }
+
+    #[test]
+    fn switch_system_image_requests_preserve_optional_bool_wire_contract() {
+        let stored_request = ApplyStoredSwitchSystemImageRequest {
+            allow_onie_recovery: Some(false),
+            ..Default::default()
+        };
+
+        let direct_request = ApplySwitchSystemImageRequest {
+            allow_onie_recovery: Some(false),
+            ..Default::default()
+        };
+
+        let stored_encoded = stored_request.encode_to_vec();
+        let direct_encoded = direct_request.encode_to_vec();
+
+        assert_eq!(stored_encoded, [0x38, 0x00]);
+        assert_eq!(direct_encoded, [0x40, 0x00]);
+
+        assert_eq!(
+            ApplyStoredSwitchSystemImageRequest::default().allow_onie_recovery,
+            None
+        );
+
+        assert_eq!(
+            ApplySwitchSystemImageRequest::default().allow_onie_recovery,
+            None
+        );
     }
 
     #[test]
