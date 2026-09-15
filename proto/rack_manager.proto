@@ -1042,6 +1042,7 @@ message UpdateSwitchSystemImageRequest {
   NodeSet nodes = 2; // Switch nodes to update
   string image_filename = 3; // Binary filename as it should exist on the switch
   string local_file_path = 4; // Local file path on the RMS host
+  optional bool allow_onie_recovery = 5; // Allow recovery in cases where NVOS is not installed
 }
 
 // UpdateSwitchSystemImageResponse reports switch system image update job creation results.
@@ -1216,7 +1217,7 @@ message ApplyStoredSwitchSystemImageRequest {
   string software_type = 4; // "dev" or "prod"
   string hardware_type = 5;
   NodeSet nodes = 6; // Caller-supplied switch nodes
-  optional bool allow_onie_recovery = 7;
+  optional bool allow_onie_recovery = 7; // Allow recovery in cases where NVOS is not installed
 }
 
 message ApplyStoredSwitchSystemImageResponse {
@@ -1233,7 +1234,7 @@ message ApplySwitchSystemImageRequest {
   string software_type = 5; // "dev" or "prod"
   string hardware_type = 6;
   NodeSet nodes = 7; // Caller-supplied switch nodes
-  optional bool allow_onie_recovery = 8;
+  optional bool allow_onie_recovery = 8; // Allow recovery in cases where NVOS is not installed
 }
 
 message ApplySwitchSystemImageResponse {
