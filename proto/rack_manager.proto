@@ -978,6 +978,17 @@ message UpdateFirmwareRequest {
   string rack_id = 6; // Rack containing the target node
   repeated FirmwareTarget firmware_targets = 7; // Multiple (target, filename) pairs for batch component updates
   bool force_update = 8; // Force the BMC to accept the firmware even if it's a downgrade
+
+  // When true, RMS launches an NVSSVT system validation scan against this
+  // node's registered BMC (and host OS, if configured) once this firmware
+  // job is successful. The scan runs as its
+  // own asynchronous rack_manager_v2.RackManagerV2 SystemValidation job, not
+  // as a child of this job; its job_id is not returned here, but is
+  // discoverable via RMS's structured logs correlating this job's node with
+  // the scan job. No-op (logged, not an error) when the target node type has
+  // no BMC endpoint or NVSSVT is not configured on the server.
+  // Defaults to false.
+  bool run_system_validation = 9;
 }
 
 // UpdateFirmwareResponse reports the firmware update result.

@@ -43,6 +43,16 @@ service RackManagerV2 {
    * rack_manager.ScaleUpFabricStatus describing the resulting fabric state.
    */
   rpc ConfigureScaleUpFabricManager(ConfigureScaleUpFabricManagerRequest) returns (ConfigureScaleUpFabricManagerResponse) {}
+
+  /*
+   * StartSystemValidation launches an NVSSVT system validation scan against a
+   * DUT as an asynchronous RMS job. NVSSVT itself may run for a long time.
+   *
+   * Returns a job_id; poll it via rack_manager.GetJobStatus. On completion,
+   * rack_manager.JobStatus.result_json holds the scan's parsed per-DUT status
+   * and summary report JSON.
+   */
+  rpc StartSystemValidation(StartSystemValidationRequest) returns (StartSystemValidationResponse) {}
 }
 
 /*
@@ -92,4 +102,30 @@ message ConfigureScaleUpFabricManagerResponse {
   // rack_manager.JobStatus.result_json contains a JSON-encoded
   // rack_manager.ScaleUpFabricStatus describing the resulting fabric state.
   string job_id = 1;
+}
+
+// StartSystemValidationRequest carries NVSSVT's own launch parameters; fields
+// here mirror NVSSVT's launcher CLI/HTTP API (nvssvt_server.py) 1:1. Anything
+// left unset falls back to NVSSVT's own CLI defaults.
+message StartSystemValidationRequest {
+  string bmc_ip = 1;
+  string bmc_user = 2;
+  string bmc_pwd = 3;
+  string host_ip = 4;
+  string host_user = 5;
+  string host_pwd = 6;
+}
+
+// StartSystemValidationResponse reports the launched scan's job handle and
+// subprocess details.
+message StartSystemValidationResponse {
+  // ID of the asynchronous job tracking this scan. Poll it via
+  // rack_manager.GetJobStatus.
+  string job_id = 1;
+  // OS process ID of the launched NVSSVT subprocess.
+  int64 pid = 2;
+  // Directory NVSSVT writes its logs and result artifacts under.
+  string log_dir = 3;
+  // RFC 3339 timestamp the scan was launched at.
+  string started_at = 4;
 }
