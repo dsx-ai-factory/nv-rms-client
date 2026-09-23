@@ -111,6 +111,11 @@ message ConfigureScaleUpFabricManagerResponse {
 // NVSSVT knob at its CLI default, so they are not exposed here.
 message StartSystemValidationRequest {
   rack_manager.NodeInfo node = 1;
+
+  // Passed through to NVSSVT as --config-override. Left unset, NVSSVT applies
+  // its own configuration defaults. RMS does not interpret or validate this
+  // value; NVSSVT rejects it if malformed.
+  string config_override = 2;
 }
 
 // StartSystemValidationResponse reports the launched scan's job handle. The
