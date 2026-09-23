@@ -104,28 +104,24 @@ message ConfigureScaleUpFabricManagerResponse {
   string job_id = 1;
 }
 
-// StartSystemValidationRequest carries NVSSVT's own launch parameters; fields
-// here mirror NVSSVT's launcher CLI/HTTP API (nvssvt_server.py) 1:1. Anything
-// left unset falls back to NVSSVT's own CLI defaults.
+// StartSystemValidationRequest identifies the node to scan. NVSSVT reaches the
+// DUT over its BMC (required) and, when supplied, its host OS, so node.bmc_endpoint
+// must carry username/password credentials; NVSSVT's CLI takes no other
+// credential form. RMS fixes the qualification level and leaves every other
+// NVSSVT knob at its CLI default, so they are not exposed here.
 message StartSystemValidationRequest {
-  string bmc_ip = 1;
-  string bmc_user = 2;
-  string bmc_pwd = 3;
-  string host_ip = 4;
-  string host_user = 5;
-  string host_pwd = 6;
+  rack_manager.NodeInfo node = 1;
 }
 
-// StartSystemValidationResponse reports the launched scan's job handle and
-// subprocess details.
+// StartSystemValidationResponse reports the launched scan's job handle. The
+// NVSSVT process id and log directory live on the launcher's side of the pod
+// and are not addressable by callers, so they are reported in RMS's logs
+// rather than here; the scan's log directory also appears in the job's
+// result_json once it completes.
 message StartSystemValidationResponse {
   // ID of the asynchronous job tracking this scan. Poll it via
   // rack_manager.GetJobStatus.
   string job_id = 1;
-  // OS process ID of the launched NVSSVT subprocess.
-  int64 pid = 2;
-  // Directory NVSSVT writes its logs and result artifacts under.
-  string log_dir = 3;
   // RFC 3339 timestamp the scan was launched at.
-  string started_at = 4;
+  string started_at = 2;
 }
