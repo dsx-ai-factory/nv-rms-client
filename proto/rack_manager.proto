@@ -1205,14 +1205,14 @@ message ApplyFirmwareObjectRequest {
 
   // When true, RMS launches an NVSSVT system validation scan against each
   // node's BMC (and host OS, if supplied) once that node's firmware job
-  // reaches a terminal state -- whether it succeeded or failed, since a failed
-  // update is exactly when a validation scan is worth running. Each scan runs
-  // as its own asynchronous rack_manager_v2.RackManagerV2 SystemValidation
-  // job, not as a child of this job; their job_ids are not returned here, but
-  // are discoverable via RMS's structured logs correlating each node with its
-  // scan job. No-op (logged, not an error) when a node type has no BMC
-  // endpoint, and logged but not fatal when the NVSSVT launcher is
-  // unreachable. Defaults to false.
+  // completes successfully. Nodes whose update failed are not scanned: the
+  // scan would report on the firmware still installed, not the firmware this
+  // request asked for. Each scan runs as its own asynchronous
+  // rack_manager_v2.RackManagerV2 SystemValidation job, not as a child of this
+  // job; their job_ids are not returned here, but are discoverable via RMS's
+  // structured logs correlating each node with its scan job. No-op (logged,
+  // not an error) when a node type has no BMC endpoint, and logged but not
+  // fatal when the NVSSVT launcher is unreachable. Defaults to false.
   bool run_system_validation = 11;
 }
 
