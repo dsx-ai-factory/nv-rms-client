@@ -43,6 +43,16 @@ service RackManagerV2 {
    * rack_manager.ScaleUpFabricStatus describing the resulting fabric state.
    */
   rpc ConfigureScaleUpFabricManager(ConfigureScaleUpFabricManagerRequest) returns (ConfigureScaleUpFabricManagerResponse) {}
+
+  /*
+   * StartSystemValidation launches an NVSSVT system validation scan against a
+   * DUT as an asynchronous RMS job. NVSSVT itself may run for a long time.
+   *
+   * Returns a job_id; poll it via rack_manager.GetJobStatus. On completion,
+   * rack_manager.JobStatus.result_json holds the scan's parsed per-DUT status
+   * and summary report JSON.
+   */
+  rpc StartSystemValidation(StartSystemValidationRequest) returns (StartSystemValidationResponse) {}
 }
 
 /*
@@ -92,4 +102,31 @@ message ConfigureScaleUpFabricManagerResponse {
   // rack_manager.JobStatus.result_json contains a JSON-encoded
   // rack_manager.ScaleUpFabricStatus describing the resulting fabric state.
   string job_id = 1;
+}
+
+// StartSystemValidationRequest identifies the node to scan. NVSSVT reaches the
+// DUT over its BMC (required) and, when supplied, its host OS, so node.bmc_endpoint
+// must carry username/password credentials; NVSSVT's CLI takes no other
+// credential form. RMS fixes the qualification level and leaves every other
+// NVSSVT knob at its CLI default, so they are not exposed here.
+message StartSystemValidationRequest {
+  rack_manager.NodeInfo node = 1;
+
+  // Passed through to NVSSVT as --config-override. Left unset, NVSSVT applies
+  // its own configuration defaults. RMS does not interpret or validate this
+  // value; NVSSVT rejects it if malformed.
+  string config_override = 2;
+}
+
+// StartSystemValidationResponse reports the launched scan's job handle. The
+// NVSSVT process id and log directory live on the launcher's side of the pod
+// and are not addressable by callers, so they are reported in RMS's logs
+// rather than here; the scan's log directory also appears in the job's
+// result_json once it completes.
+message StartSystemValidationResponse {
+  // ID of the asynchronous job tracking this scan. Poll it via
+  // rack_manager.GetJobStatus.
+  string job_id = 1;
+  // RFC 3339 timestamp the scan was launched at.
+  string started_at = 2;
 }
