@@ -325,6 +325,16 @@ pub trait RmsApi: Send + Sync + 'static {
         Err(tonic::Status::unimplemented("RackManagerV2 is not implemented by this RmsApi").into())
     }
 
+    /// Launches an NVSSVT system validation scan as an asynchronous job.
+    ///
+    /// Implementors may omit this method; the default returns `Unimplemented`.
+    async fn start_system_validation(
+        &self,
+        _cmd: rms_v2::StartSystemValidationRequest,
+    ) -> Result<rms_v2::StartSystemValidationResponse, RackManagerError> {
+        Err(tonic::Status::unimplemented("RackManagerV2 is not implemented by this RmsApi").into())
+    }
+
     async fn configure_scale_up_fabric_manager(
         &self,
         cmd: rms::ConfigureScaleUpFabricManagerRequest,
@@ -661,6 +671,21 @@ impl RmsApi for RackManagerApi {
 
         Ok(client_v2
             .configure_scale_up_fabric_manager(tonic::Request::new(cmd))
+            .await?
+            .into_inner())
+    }
+
+    async fn start_system_validation(
+        &self,
+        cmd: rms_v2::StartSystemValidationRequest,
+    ) -> Result<rms_v2::StartSystemValidationResponse, RackManagerError> {
+        // Reuse the V1 provider's configured readiness and retry policy before calling V2.
+        let _ = self.client.connection().await?;
+
+        let mut client_v2 = RmsTlsClient::new(&self.config).build_rms_client_v2(&self.api_url)?;
+
+        Ok(client_v2
+            .start_system_validation(tonic::Request::new(cmd))
             .await?
             .into_inner())
     }
