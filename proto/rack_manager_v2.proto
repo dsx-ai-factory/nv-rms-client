@@ -43,6 +43,20 @@ service RackManagerV2 {
    * rack_manager.ScaleUpFabricStatus describing the resulting fabric state.
    */
   rpc ConfigureScaleUpFabricManager(ConfigureScaleUpFabricManagerRequest) returns (ConfigureScaleUpFabricManagerResponse) {}
+
+  /*
+   * StartSystemValidation launches an NVSSVT system validation scan against each
+   * Device Under Test (DUT) in the request, each as its own asynchronous RMS job.
+   * NVSSVT itself may run for a long time, and each node's scan runs independently:
+   * one node's admission or launch failure does not affect any other node's scan.
+   *
+   * Returns a parent job_id (response.job_id); poll it via rack_manager.GetJobStatus
+   * to track the batch as a whole. Each admitted node's own scan job_id is also
+   * returned in `jobs`, for polling and result retrieval scoped to that node. On
+   * completion, each scan job's rack_manager.JobStatus.result_json holds its
+   * parsed per-DUT status and summary report JSON.
+   */
+  rpc StartSystemValidation(StartSystemValidationRequest) returns (StartSystemValidationResponse) {}
 }
 
 /*
@@ -92,4 +106,32 @@ message ConfigureScaleUpFabricManagerResponse {
   // rack_manager.JobStatus.result_json contains a JSON-encoded
   // rack_manager.ScaleUpFabricStatus describing the resulting fabric state.
   string job_id = 1;
+}
+
+// StartSystemValidationRequest identifies the nodes to scan. NVSSVT reaches each
+// Device Under Test (DUT) over its BMC (required) and, when supplied, its host OS, so
+// every node's bmc_endpoint must carry credentials.
+message StartSystemValidationRequest {
+  rack_manager.NodeSet nodes = 1;
+
+  // Passed through to NVSSVT as --config-override for every node's scan. Left
+  // unset, NVSSVT applies its own configuration defaults. RMS does not
+  // interpret or validate this value; NVSSVT rejects it if malformed.
+  string config_override = 2;
+}
+
+// NodeSystemValidationJobInfo pairs a node with its async system validation job ID.
+message NodeSystemValidationJobInfo {
+  string node_id = 1; // Node identifier, as supplied in the request
+  string job_id = 2; // System validation job ID returned for this node
+}
+
+// StartSystemValidationResponse reports the launched scans' job handles, one
+// per admitted node. The NVSSVT process id and log directory live on the
+// launcher's side of the pod and are not addressable by callers, so they are
+// reported in RMS's logs rather than here; each scan's log directory also
+// appears in its job's result_json once it completes.
+message StartSystemValidationResponse {
+  rack_manager.NodeBatchResponse response = 1; // response.job_id is the parent job ID for GetJobStatus
+  repeated NodeSystemValidationJobInfo jobs = 2; // Individual scan job ID per node
 }

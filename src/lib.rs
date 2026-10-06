@@ -335,6 +335,8 @@ mod tests {
         assert_serde::<rms_v2::ConfigureScaleUpFabricManagerRequest>();
         assert_serde::<rms_v2::ConfigureScaleUpFabricManagerResponse>();
         assert_serde::<rms_v2::ScaleUpFabricConfig>();
+        assert_serde::<rms_v2::StartSystemValidationRequest>();
+        assert_serde::<rms_v2::StartSystemValidationResponse>();
 
         // Timestamp-backed responses
         assert_serde::<rms::GetFirmwareJobStatusResponse>();
