@@ -954,12 +954,14 @@ dependencies = [
  "lazy_static",
  "prettyplease",
  "proc-macro2",
+ "prost",
  "prost-types",
  "quote",
  "syn",
  "thiserror",
  "tonic",
  "tonic-prost-build",
+ "tracing",
 ]
 
 [[package]]

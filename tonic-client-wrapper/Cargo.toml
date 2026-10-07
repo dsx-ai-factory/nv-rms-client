@@ -20,6 +20,8 @@ codegen = [
 tls-ring = ["tonic/tls-ring"]
 
 [dependencies]
+prost = "0.14"
+tracing = "0.1"
 thiserror = "2.0.14"
 tonic = "0.14"
 async-trait = "0.1.88"

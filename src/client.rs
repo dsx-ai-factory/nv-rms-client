@@ -36,11 +36,19 @@ use crate::protos::rack_manager::rack_manager_client::RackManagerClient;
 use crate::protos::rack_manager_v2::rack_manager_v2_client::RackManagerV2Client;
 use crate::{ConfigurationError, RmsTlsClientError};
 
-type TransportService = BoxCloneService<
+/// Cloneable RMS HTTP transport, exposed for caller-supplied layers.
+pub type TransportService = BoxCloneService<
     hyper::Request<Body>,
     hyper::Response<Incoming>,
     hyper_util::client::legacy::Error,
 >;
+
+/// Caller-owned transport layer, reapplied whenever a connection is rebuilt.
+/// Implementations must preserve the HTTP/2 request/response and error contract.
+pub trait RmsTransportLayer: Send + Sync + std::fmt::Debug {
+    /// Wraps the shared transport before either V1 or V2 tonic client is constructed.
+    fn layer(&self, transport: TransportService) -> TransportService;
+}
 
 pub type RackManagerClientT = RackManagerClient<TransportService>;
 
@@ -325,7 +333,11 @@ impl<'a> RmsTlsClient<'a> {
             .build(https_connector)
             .boxed_clone();
 
-        Ok((hyper_client, uri))
+        let transport = match &self.rms_client_config.transport_layer {
+            Some(layer) => layer.layer(hyper_client),
+            None => hyper_client,
+        };
+        Ok((transport, uri))
     }
 
     /// Builds a new Client for the Rack Manager API which uses a HTTPS/TLS connector

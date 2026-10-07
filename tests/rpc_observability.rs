@@ -1,0 +1,276 @@
+/*
+ * SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: LicenseRef-Apache-2.0
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+#![cfg(feature = "client")]
+
+use std::convert::Infallible;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, SystemTime};
+
+use http_body_util::{BodyExt, Full};
+use hyper::body::{Bytes, Incoming};
+use hyper_util::rt::{TokioExecutor, TokioIo};
+use librms::client::{RetryConfig, RmsApiConfig, RmsTransportLayer, TransportService};
+use librms::client_config::RmsClientConfig;
+use librms::protos::rack_manager as rms;
+use librms::protos::rack_manager_v2 as rms_v2;
+use librms::protos::rack_manager_v2_client::RackManagerV2ApiClient;
+use librms::{RackManagerApi, RmsApi, RpcObservation, RpcObserver};
+use prost::Message;
+use tower::{Service, ServiceExt};
+
+#[derive(Debug, Default)]
+struct Capture {
+    records: Arc<Mutex<Vec<Record>>>,
+}
+
+#[derive(Debug)]
+struct Record {
+    method: &'static str,
+    request_type: &'static str,
+    request: Vec<u8>,
+    response_type: &'static str,
+    response: Option<Vec<u8>>,
+    code: tonic::Code,
+    started: SystemTime,
+    finished: SystemTime,
+}
+
+struct Observation {
+    capture: Arc<Mutex<Vec<Record>>>,
+    record: Option<Record>,
+}
+
+impl RpcObserver for Capture {
+    fn start(
+        &self,
+        method: &'static str,
+        request_type: &'static str,
+        request: &[u8],
+        started: SystemTime,
+    ) -> Box<dyn RpcObservation> {
+        Box::new(Observation {
+            capture: self.records.clone(),
+            record: Some(Record {
+                method,
+                request_type,
+                request: request.to_vec(),
+                response_type: "",
+                response: None,
+                code: tonic::Code::Unknown,
+                started,
+                finished: started,
+            }),
+        })
+    }
+}
+
+impl RpcObservation for Observation {
+    fn span(&self) -> tracing::Span {
+        tracing::Span::none()
+    }
+    fn finish(
+        &mut self,
+        response_type: &'static str,
+        response: Option<&[u8]>,
+        code: tonic::Code,
+        finished: SystemTime,
+    ) {
+        let mut record = self.record.take().unwrap();
+        record.response_type = response_type;
+        record.response = response.map(<[u8]>::to_vec);
+        record.code = code;
+        record.finished = finished;
+        self.capture.lock().unwrap().push(record);
+    }
+}
+
+#[derive(Debug)]
+struct Disabled;
+
+impl RpcObserver for Disabled {
+    fn enabled(&self) -> bool {
+        false
+    }
+    fn start(
+        &self,
+        _: &'static str,
+        _: &'static str,
+        _: &[u8],
+        _: SystemTime,
+    ) -> Box<dyn RpcObservation> {
+        panic!("disabled observer must not be called")
+    }
+}
+
+#[derive(Debug)]
+struct InjectHeader;
+
+impl RmsTransportLayer for InjectHeader {
+    fn layer(&self, transport: TransportService) -> TransportService {
+        tower::service_fn(move |mut request: hyper::Request<tonic::body::Body>| {
+            let mut transport = transport.clone();
+            request.headers_mut().insert(
+                "traceparent",
+                "00-11111111111111111111111111111111-2222222222222222-01"
+                    .parse()
+                    .unwrap(),
+            );
+            async move { transport.ready().await?.call(request).await }
+        })
+        .boxed_clone()
+    }
+}
+
+fn grpc_response<M: Message>(message: M) -> hyper::Response<Full<Bytes>> {
+    let body = message.encode_to_vec();
+    let mut frame = vec![0];
+    frame.extend_from_slice(&(body.len() as u32).to_be_bytes());
+    frame.extend(body);
+    hyper::Response::builder()
+        .header("content-type", "application/grpc")
+        .header("grpc-status", "0")
+        .body(Full::new(Bytes::from(frame)))
+        .unwrap()
+}
+
+#[tokio::test]
+async fn real_unary_transport_preserves_payloads_and_observes_v1_v2_and_status() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    let server = tokio::spawn(async move {
+        loop {
+            let (socket, _) = listener.accept().await.unwrap();
+            tokio::spawn(async move {
+                let service =
+                    hyper::service::service_fn(|request: hyper::Request<Incoming>| async move {
+                        assert!(request.headers().contains_key("traceparent"));
+                        let path = request.uri().path().to_owned();
+                        let body = request.into_body().collect().await.unwrap().to_bytes();
+                        let response = match path.as_str() {
+                            "/rack_manager.RackManager/GetVersion" => {
+                                grpc_response(rms::GetVersionResponse {
+                                    version: "test-version".to_string(),
+                                })
+                            }
+                            "/rack_manager.RackManager/UpdateSwitchSystemPassword" => {
+                                let decoded =
+                                    rms::UpdateSwitchSystemPasswordRequest::decode(&body[5..])
+                                        .unwrap();
+                                assert_eq!(decoded.password, "test-password");
+                                hyper::Response::builder()
+                                    .header("content-type", "application/grpc")
+                                    .header("grpc-status", "7")
+                                    .header("grpc-message", "test-password must never be audited")
+                                    .body(Full::new(Bytes::new()))
+                                    .unwrap()
+                            }
+                            "/rack_manager_v2.RackManagerV2/ConfigureScaleUpFabricManager" => {
+                                grpc_response(rms_v2::ConfigureScaleUpFabricManagerResponse {
+                                    job_id: "job-42".to_string(),
+                                })
+                            }
+                            _ => panic!("unexpected RPC {path}"),
+                        };
+                        Ok::<_, Infallible>(response)
+                    });
+                hyper::server::conn::http2::Builder::new(TokioExecutor::new())
+                    .serve_connection(TokioIo::new(socket), service)
+                    .await
+                    .unwrap();
+            });
+        }
+    });
+    let capture = Arc::new(Capture::default());
+    let mut config = RmsClientConfig::new(None, None, None, false);
+    config.transport_layer = Some(Arc::new(InjectHeader));
+    config.rpc_observer = Some(capture.clone());
+    let api_config = RmsApiConfig::new(&url, &config).with_retry_config(RetryConfig {
+        retries: 0,
+        interval: Duration::ZERO,
+    });
+    let api = RackManagerApi::new(&api_config);
+    let version = api.client.clone().get_version().await.unwrap();
+    assert_eq!(version.version, "test-version");
+    let request = rms::UpdateSwitchSystemPasswordRequest {
+        password: "test-password".to_string(),
+        ..Default::default()
+    };
+    let status = api
+        .client
+        .update_switch_system_password(request.clone())
+        .await
+        .unwrap_err();
+    assert_eq!(status.code(), tonic::Code::PermissionDenied);
+    assert!(status.message().contains("test-password"));
+    let v2 = RackManagerV2ApiClient::new(&api_config);
+    let response = v2
+        .configure_scale_up_fabric_manager(rms_v2::ConfigureScaleUpFabricManagerRequest::default())
+        .await
+        .unwrap();
+    assert_eq!(response.job_id, "job-42");
+    let via_api = api
+        .configure_scale_up_fabric_manager_v2(
+            rms_v2::ConfigureScaleUpFabricManagerRequest::default(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(via_api, response);
+    {
+        let records = capture.records.lock().unwrap();
+        assert_eq!(records.len(), 4); // Readiness probes are transport calls, not logical wrapper calls.
+        assert_eq!(records[0].method, "GetVersion");
+        assert_eq!(records[0].response_type, "rack_manager.GetVersionResponse");
+        assert_eq!(
+            rms::GetVersionResponse::decode(records[0].response.as_deref().unwrap()).unwrap(),
+            version
+        );
+        assert_eq!(
+            records[1].request_type,
+            "rack_manager.UpdateSwitchSystemPasswordRequest"
+        );
+        assert_eq!(
+            rms::UpdateSwitchSystemPasswordRequest::decode(records[1].request.as_slice()).unwrap(),
+            request
+        );
+        assert_eq!(records[1].code, tonic::Code::PermissionDenied);
+        assert!(records[1].response.is_none());
+        assert_eq!(records[2].method, "ConfigureScaleUpFabricManager");
+        for record in records.iter() {
+            assert!(record.finished >= record.started);
+        }
+    }
+    config.rpc_observer = Some(Arc::new(Disabled));
+    let unobserved = RackManagerApi::new(&RmsApiConfig::new(&url, &config));
+    assert_eq!(unobserved.client.get_version().await.unwrap(), version);
+    assert_eq!(capture.records.lock().unwrap().len(), 4);
+    server.abort();
+}
+
+#[tokio::test]
+async fn lazy_connection_failure_is_observed_once() {
+    let capture = Arc::new(Capture::default());
+    let config = RmsClientConfig {
+        rpc_observer: Some(capture.clone()),
+        ..Default::default()
+    };
+    // A malformed URL fails before network I/O or retries.
+    let api_config = RmsApiConfig::new("http://[invalid", &config);
+    let result = RackManagerApi::new(&api_config).client.get_version().await;
+    assert_eq!(result.unwrap_err().code(), tonic::Code::Unavailable);
+    let records = capture.records.lock().unwrap();
+    assert_eq!(records.len(), 1);
+    assert_eq!(records[0].code, tonic::Code::Unavailable);
+    assert!(records[0].response.is_none());
+}

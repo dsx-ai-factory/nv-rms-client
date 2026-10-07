@@ -664,15 +664,31 @@ impl RmsApi for RackManagerApi {
         &self,
         cmd: rms_v2::ConfigureScaleUpFabricManagerRequest,
     ) -> Result<rms_v2::ConfigureScaleUpFabricManagerResponse, RackManagerError> {
-        // Reuse the V1 provider's configured readiness and retry policy before calling V2.
-        let _ = self.client.connection().await?;
-
-        let mut client_v2 = RmsTlsClient::new(&self.config).build_rms_client_v2(&self.api_url)?;
-
-        Ok(client_v2
-            .configure_scale_up_fabric_manager(tonic::Request::new(cmd))
-            .await?
-            .into_inner())
+        let observation = tonic_client_wrapper::start_rpc(
+            self.config.rpc_observer.as_deref(),
+            "ConfigureScaleUpFabricManager",
+            "rack_manager_v2.ConfigureScaleUpFabricManagerRequest",
+            &cmd,
+        );
+        tonic_client_wrapper::finish_rpc(
+            observation,
+            "rack_manager_v2.ConfigureScaleUpFabricManagerResponse",
+            async {
+                // Preserve the shared V1 readiness/retry policy before constructing the V2 client.
+                let _ = self.client.connection().await?;
+                let mut client_v2 =
+                    RmsTlsClient::new(&self.config).build_rms_client_v2(&self.api_url)?;
+                Ok(client_v2
+                    .configure_scale_up_fabric_manager(tonic::Request::new(cmd))
+                    .await?
+                    .into_inner())
+            },
+            |error: &RackManagerError| match error {
+                RackManagerError::ApiInvocationError(status) => status.code(),
+                RackManagerError::TlsError(_) => tonic::Code::Unavailable,
+            },
+        )
+        .await
     }
 
     async fn start_system_validation(
@@ -884,6 +900,10 @@ impl tonic_client_wrapper::ConnectionProvider<RackManagerClientT> for RmsTlsConn
         }
     }
 
+    fn rpc_observer(&self) -> Option<&dyn tonic_client_wrapper::RpcObserver> {
+        self.client_config.rpc_observer.as_deref()
+    }
+
     fn connection_url(&self) -> &str {
         self.url.as_str()
     }
@@ -958,6 +978,10 @@ impl tonic_client_wrapper::ConnectionProvider<RackManagerV2ClientT> for RmsTlsCo
         } else {
             false
         }
+    }
+
+    fn rpc_observer(&self) -> Option<&dyn tonic_client_wrapper::RpcObserver> {
+        self.client_config.rpc_observer.as_deref()
     }
 
     fn connection_url(&self) -> &str {

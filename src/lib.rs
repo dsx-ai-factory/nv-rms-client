@@ -347,3 +347,10 @@ mod tests {
         assert_serde::<rms::BatchGetFirmwareInventoryResponse>();
     }
 }
+
+/// Unary RPC observation contracts for consumers supplying auditing policy.
+#[cfg(feature = "client")]
+pub use tonic_client_wrapper::{RpcObservation, RpcObserver};
+
+/// Descriptor set for decoding RMS V1 and V2 messages without client transport dependencies.
+pub const FILE_DESCRIPTOR_SET: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/rms.bin"));

@@ -23,6 +23,11 @@ mod utils;
 /// tonic-client-wrapper to be agnostic to how connections are actually made to the server.
 #[async_trait::async_trait]
 pub trait ConnectionProvider<T: Clone>: Send + Sync + std::fmt::Debug + 'static {
+    /// Optional observer for unary RPCs, including connection failures. Disabled by default.
+    fn rpc_observer(&self) -> Option<&dyn RpcObserver> {
+        None
+    }
+
     /// Function which provides a connection.
     ///
     /// The Connection type, T, is the code-generated type from tonic_build that contains all the
@@ -38,4 +43,81 @@ pub trait ConnectionProvider<T: Clone>: Send + Sync + std::fmt::Debug + 'static 
 
     /// Return the server URL for the connection, for debug/logging purposes.
     fn connection_url(&self) -> &str;
+}
+
+/// Policy supplied by a caller for decoded unary RPC auditing. No metadata is exposed.
+/// Callbacks must redact sensitive payloads before recording and must not block.
+pub trait RpcObserver: Send + Sync + std::fmt::Debug {
+    /// Whether this call should be observed. False avoids payload encoding and callbacks.
+    /// Evaluated once at call start; an already-started observation always completes.
+    fn enabled(&self) -> bool {
+        true
+    }
+
+    /// Starts one logical RPC, before lazy connection setup. Names are protobuf names;
+    /// `request` is an unredacted protobuf message, not a gRPC frame.
+    fn start(
+        &self,
+        method: &'static str,
+        request_type: &'static str,
+        request: &[u8],
+        started: std::time::SystemTime,
+    ) -> Box<dyn RpcObservation>;
+}
+
+/// One in-flight RPC. Implement Drop if cancelled calls should also be recorded.
+pub trait RpcObservation: Send {
+    /// Span to enter while polling the RPC, including transport context injection.
+    fn span(&self) -> tracing::Span;
+
+    /// Records completion. Successful bodies are unredacted protobuf messages;
+    /// failures expose only the status code, since status text may contain secrets.
+    fn finish(
+        &mut self,
+        response_type: &'static str,
+        response: Option<&[u8]>,
+        code: tonic::Code,
+        finished: std::time::SystemTime,
+    );
+}
+
+/// Starts auditing only when a provider has an observer; otherwise no encoding is done.
+pub fn start_rpc<M: prost::Message>(
+    observer: Option<&dyn RpcObserver>,
+    method: &'static str,
+    request_type: &'static str,
+    request: &M,
+) -> Option<Box<dyn RpcObservation>> {
+    observer
+        .filter(|observer| observer.enabled())
+        .map(|observer| {
+            observer.start(
+                method,
+                request_type,
+                &request.encode_to_vec(),
+                std::time::SystemTime::now(),
+            )
+        })
+}
+
+/// Polls the RPC under the observer's span and reports its unchanged result.
+pub async fn finish_rpc<M: prost::Message, E>(
+    mut observation: Option<Box<dyn RpcObservation>>,
+    response_type: &'static str,
+    future: impl std::future::Future<Output = Result<M, E>>,
+    status_code: impl Fn(&E) -> tonic::Code,
+) -> Result<M, E> {
+    use tracing::Instrument;
+    let span = observation
+        .as_ref()
+        .map(|o| o.span())
+        .unwrap_or_else(tracing::Span::none);
+    let result = future.instrument(span).await;
+    if let Some(observation) = observation.as_mut() {
+        let finished = std::time::SystemTime::now();
+        let payload = result.as_ref().ok().map(prost::Message::encode_to_vec);
+        let code = result.as_ref().err().map_or(tonic::Code::Ok, status_code);
+        observation.finish(response_type, payload.as_deref(), code, finished);
+    }
+    result
 }
