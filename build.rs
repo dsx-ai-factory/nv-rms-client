@@ -14,6 +14,64 @@
 
 use std::path::PathBuf;
 
+// JSON omission policies preserve legacy request and response shapes.
+const FABRIC_SERDE_FIELD_ATTRIBUTES: &[(&str, &[&str])] = &[
+    (
+        r#"#[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "Option::is_none"))]"#,
+        &[
+            "rack_manager.GetScaleUpFabricStatusRequest.inspection",
+            "rack_manager.GetScaleUpFabricStatusResponse.observation",
+            "rack_manager.ScaleUpFabricInspection.compute_nodes",
+            "rack_manager.ScaleUpFabricInspectionObservation.requested_scope",
+            "rack_manager.ScaleUpFabricInspectionObservation.authoritative_primary_node_id",
+            "rack_manager.ScaleUpFabricInspectionObservation.topology_type",
+            "rack_manager.ScaleUpFabricInspectionObservation.health",
+            "rack_manager.ScaleUpFabricInspectionObservation.raw_control_plane_state",
+            "rack_manager.ScaleUpFabricInspectionObservation.raw_controller_health",
+            "rack_manager.ScaleUpFabricInspectionObservation.matches_requested_nodes",
+            "rack_manager.ScaleUpFabricReadResult.node_id",
+            "rack_manager.ScaleUpFabricSwitchObservation.location",
+            "rack_manager.ScaleUpFabricSwitchObservation.enabled",
+            "rack_manager.ScaleUpFabricSwitchObservation.raw_cluster_state",
+            "rack_manager.ScaleUpFabricInterfaceObservation.applied_explicit_state",
+            "rack_manager.ScaleUpFabricInterfaceObservation.startup_explicit_state",
+            "rack_manager.ScaleUpFabricInterfaceObservation.effective_admin_state",
+            "rack_manager.ScaleUpFabricInterfaceObservation.raw_operational_state",
+            "rack_manager.ScaleUpFabricInterfaceObservation.raw_physical_state",
+            "rack_manager.ScaleUpFabricComputeObservation.location",
+            "rack_manager.ScaleUpFabricMemberObservation.node_id",
+            "rack_manager.ScaleUpFabricMemberObservation.chassis_serial_number",
+            "rack_manager.ScaleUpFabricMemberObservation.tray_index",
+            "rack_manager.ScaleUpFabricMemberObservation.raw_device_health",
+            "rack_manager.ScaleUpFabricMemberObservation.raw_node_health",
+            "rack_manager_v2.ConfigureScaleUpFabricManagerRequest.layout",
+            "rack_manager.ScaleUpFabricNodeLocation.chassis_serial_number",
+            "rack_manager.ScaleUpFabricNodeLocation.tray_index",
+            "rack_manager.ScaleUpFabricNodeLocation.slot_number",
+            "rack_manager_v2.ScaleUpFabricSpec.primary_switch_node_id",
+        ],
+    ),
+    (
+        r#"#[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "Vec::is_empty"))]"#,
+        &[
+            "rack_manager_v2.ConfigureScaleUpFabricManagerResponse.resolved_fabrics",
+            "rack_manager_v2.ScaleUpFabricSpec.compute_node_ids",
+            "rack_manager_v2.ScaleUpFabricSpec.switch_node_ids",
+        ],
+    ),
+    (
+        r#"#[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "std::ops::Not::not"))]"#,
+        &["rack_manager_v2.ConfigureScaleUpFabricManagerRequest.reset_fabric_config"],
+    ),
+    (
+        r#"#[cfg_attr(feature = "serde", serde(default, with = "crate::timestamp_serde", skip_serializing_if = "Option::is_none"))]"#,
+        &[
+            "rack_manager.ScaleUpFabricObservation.collection_started_at",
+            "rack_manager.ScaleUpFabricObservation.collection_finished_at",
+        ],
+    ),
+];
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let build_client = std::env::var_os("CARGO_FEATURE_CLIENT").is_some();
     let build_server = std::env::var_os("CARGO_FEATURE_SERVER").is_some();
@@ -23,7 +81,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // so that different builds get a different binary file and concurrent builds don't collide
     let reflection = out_dir.join("rms.bin");
 
-    tonic_prost_build::configure()
+    let mut protobuf = tonic_prost_build::configure();
+
+    for &(attribute, fields) in FABRIC_SERDE_FIELD_ATTRIBUTES {
+        for &field in fields {
+            protobuf = protobuf.field_attribute(field, attribute);
+        }
+    }
+
+    protobuf
         .file_descriptor_set_path(reflection)
         // Leading dot makes this a prefix match in prost-build's PathMap, covering every message
         // and enum whose FQN starts with ".rack_manager" (i.e. the entire package).

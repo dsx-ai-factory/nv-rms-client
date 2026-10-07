@@ -304,7 +304,7 @@ message JobStatus {
   JobExecutionState execution_state = 4;
   // Human-readable message
   // This message is guaranteed to be set if the job failed.
-  // If the job succeeded, the results will be stored in result_json.
+  // Workflow-specific results appear in result_json.
   string error_message = 5;
   // Error code if job failed.
   JobError error_code = 6;
@@ -1304,25 +1304,152 @@ message ScaleUpFabricStaticConfig {
  * reported by the fabric manager, without modifying anything.
  */
 message GetScaleUpFabricStatusRequest {
-  // All switches that form the scale-up fabric.
+  // Switch inventory; inspection scopes may leave supplied switches unassigned.
   NodeSet nodes = 1;
 
   // Optional site selector used for switch server verification (TLS).
   // Defaults to --default-switch-domain when unset.
   optional string domain = 2;
+
+  // Ordered live-inspection scopes; absent preserves single-fabric status behavior.
+  ScaleUpFabricInspection inspection = 3;
 }
 
 // GetScaleUpFabricStatusResponse returns the observed scale-up fabric status.
 message GetScaleUpFabricStatusResponse {
   ReturnCode status = 1;                 // RETURN_CODE_SUCCESS if inspected, RETURN_CODE_FAILURE otherwise
-  ScaleUpFabricStatus fabric_status = 2; // Observed configuration; unset when status is RETURN_CODE_FAILURE
+  ScaleUpFabricStatus fabric_status = 2; // Single-fabric configuration; unset for inspection requests.
   string error_message = 3;              // Error details if inspection failed
+
+  // Present for inspection requests, including partial failures; fabric_status is unset.
+  // Callers must reject inspection responses without observation; older servers
+  // may ignore inspection and return legacy fabric_status instead.
+  ScaleUpFabricObservation observation = 4;
+}
+
+// Live inspection uses caller-supplied inventory, without desired settings or job history.
+message ScaleUpFabricInspection {
+  repeated ScaleUpFabricInspectionScope fabrics = 1; // Nonempty scopes in requested order.
+  NodeSet compute_nodes = 2; // BMC inventory required for referenced compute nodes.
+}
+
+// Nodes requested for each fabric, not evidence of nodes observed by the controller.
+// IDs must exist in the supplied inventories, be unique, and not overlap scopes.
+message ScaleUpFabricInspectionScope {
+  repeated string switch_node_ids = 1; // Nonempty list of switches to inspect together.
+  repeated string compute_node_ids = 2; // Empty skips compute comparison; switches are still compared.
+}
+
+// Collection disposition, separate from the value or health reported by hardware.
+enum ScaleUpFabricObservationState {
+  SCALE_UP_FABRIC_OBSERVATION_STATE_UNKNOWN = 0; // No collection disposition was reported.
+  SCALE_UP_FABRIC_OBSERVATION_STATE_COLLECTED = 1; // The resource was read successfully.
+  SCALE_UP_FABRIC_OBSERVATION_STATE_UNAVAILABLE = 2; // Collection failed or could not proceed.
+  SCALE_UP_FABRIC_OBSERVATION_STATE_NOT_APPLICABLE = 4; // The resource does not apply, such as a disabled controller.
+}
+
+// Collection result for a resource named by its containing reads map.
+// COLLECTED confirms a successful read, including an empty result. Errors may
+// still describe unrecognized or ambiguous values retained from that read.
+message ScaleUpFabricReadResult {
+  ScaleUpFabricObservationState state = 1;
+  optional string node_id = 2; // Source node when an error identifies one.
+  repeated string errors = 3; // Credential-free read or interpretation errors.
+}
+
+// Live samples collected over an interval, not an atomic rack snapshot.
+// SUCCESS means required reads completed; unhealthy hardware or differing nodes
+// does not itself cause FAILURE. Failed inspections retain successful observations.
+message ScaleUpFabricObservation {
+  google.protobuf.Timestamp collection_started_at = 1;
+  google.protobuf.Timestamp collection_finished_at = 2;
+  repeated ScaleUpFabricInspectionObservation fabrics = 3; // One per scope, in request order.
+  repeated ScaleUpFabricSwitchObservation switches = 4; // Every supplied switch, including unassigned switches.
+  repeated ScaleUpFabricComputeObservation computes = 5; // Every supplied compute node.
+}
+
+// Configuration and nodes sampled for one requested fabric.
+message ScaleUpFabricInspectionObservation {
+  ScaleUpFabricInspectionScope requested_scope = 1;
+
+  // Absent for disabled, ambiguous, or incompletely discovered fabrics.
+  optional string authoritative_primary_node_id = 3;
+  optional string topology_type = 5; // Stored topology, not a desired or inferred value.
+  repeated ScaleUpFabricStaticConfig extra_static_configs = 6; // Stored values do not prove runtime activation.
+  ScaleUpFabricControlPlaneState control_plane_state = 7;
+  ScaleUpFabricHealthStatus health = 8; // Independent controller, GFM, switch, and operational-link health.
+  repeated ScaleUpFabricMemberObservation observed_nodes = 9; // Includes unexpected and unresolved identities.
+
+  // True confirms an exact physical match; false confirms a difference.
+  // Absent means evidence is insufficient. Computes are compared only when requested.
+  optional bool matches_requested_nodes = 10;
+
+  // Keys: primary-discovery, controller-connection, controller-state, topology,
+  // static-config, switch-nodes, and compute-nodes. A missing key means no result
+  // was reported, not successful collection. Disabled fabrics report controller
+  // resources as NOT_APPLICABLE. Additional resource keys may be reported.
+  map<string, ScaleUpFabricReadResult> reads = 11;
+  optional int32 raw_control_plane_state = 16; // Raw NMX enum number, including unknown values.
+  optional int32 raw_controller_health = 17;
+}
+
+// Independent cluster and interface-view reads for a supplied switch.
+message ScaleUpFabricSwitchObservation {
+  string node_id = 1;
+  ScaleUpFabricNodeLocation location = 2;
+  optional bool enabled = 4; // Absent when cluster state is unreadable or unrecognized.
+  optional string raw_cluster_state = 5;
+  repeated ScaleUpFabricInterfaceObservation links = 10; // NVUE interface identifiers, not inferred NMX port mappings.
+
+  // Keys: switch-connection, identity, cluster, applied-links, startup-links,
+  // effective-links, and operational-links. A missing key means no result was
+  // reported. Successful empty views are COLLECTED; failed views retain other data.
+  map<string, ScaleUpFabricReadResult> reads = 11;
+}
+
+// Per-interface readback; absent values mean unknown rather than default or healthy.
+message ScaleUpFabricInterfaceObservation {
+  string interface_id = 1;
+
+  // DEFAULT is valid only after a successful view read confirms no explicit override.
+  optional ScaleUpFabricLinkState applied_explicit_state = 2;
+  optional ScaleUpFabricLinkState startup_explicit_state = 3;
+
+  // UP or DOWN when known; absent when the effective administrative state is unknown.
+  optional ScaleUpFabricLinkState effective_admin_state = 4;
+  optional string raw_operational_state = 5;
+  optional string raw_physical_state = 6;
+}
+
+// BMC identity discovery for a supplied compute node; no configuration is changed.
+message ScaleUpFabricComputeObservation {
+  string node_id = 1;
+  ScaleUpFabricNodeLocation location = 2;
+  map<string, ScaleUpFabricReadResult> reads = 4; // identity reports BMC placement discovery.
+}
+
+// Kind reported in controller device topology, without inventing unresolved identities.
+enum ScaleUpFabricMemberKind {
+  SCALE_UP_FABRIC_MEMBER_KIND_UNKNOWN = 0;
+  SCALE_UP_FABRIC_MEMBER_KIND_SWITCH = 1;
+  SCALE_UP_FABRIC_MEMBER_KIND_GPU = 2;
+}
+
+// Raw NMX physical identity. node_id exists only after physical identity correlation.
+// Unexpected members are retained but are not contacted through reported addresses.
+message ScaleUpFabricMemberObservation {
+  ScaleUpFabricMemberKind kind = 1;
+  optional string node_id = 2;
+  optional string chassis_serial_number = 3;
+  optional uint64 tray_index = 4;
+  optional int32 raw_device_health = 9; // Raw NMX enum number, including unknown values.
+  optional int32 raw_node_health = 13; // Raw NMX membership health, distinct from device health.
 }
 
 // ScaleUpFabricStatus reports the observed scale-up fabric configuration as read back
 // from the switches. It is returned directly by GetScaleUpFabricStatus and is also stored,
-// JSON-encoded, in JobStatus.result_json when a rack_manager_v2.RackManagerV2.
-// ConfigureScaleUpFabricManager job completes. Callers can compare desired and observed
+// JSON-encoded, in JobStatus.result_json when a no-layout rack_manager_v2.RackManagerV2.
+// ConfigureScaleUpFabricManager job succeeds. Callers can compare desired and observed
 // configurations to detect drift.
 message ScaleUpFabricStatus {
   // Topology type currently configured for the scale-up fabric.
@@ -1344,6 +1471,39 @@ message ScaleUpFabricSwitchStatus {
   bool enabled = 2;          // Whether the scale-up fabric cluster is enabled on this switch
   string fabric_manager_status = 3; // Raw fabric manager app status reported by the switch; empty when unavailable
   string error_message = 4;  // Set when this switch could not be inspected
+}
+
+// Observed controller configuration state, independent of data-plane health.
+enum ScaleUpFabricControlPlaneState {
+  SCALE_UP_FABRIC_CONTROL_PLANE_STATE_UNKNOWN = 0; // No conclusive observation is available.
+  SCALE_UP_FABRIC_CONTROL_PLANE_STATE_CONFIGURED = 2; // Controller configuration has converged.
+  SCALE_UP_FABRIC_CONTROL_PLANE_STATE_FAILED = 3; // Controller configuration failed.
+}
+
+// Health reported independently for each source. Configuration does not imply health.
+enum ScaleUpFabricHealthState {
+  SCALE_UP_FABRIC_HEALTH_STATE_UNKNOWN = 0; // Observations are absent or inconclusive.
+  SCALE_UP_FABRIC_HEALTH_STATE_HEALTHY = 1; // All applicable observations report healthy state.
+  SCALE_UP_FABRIC_HEALTH_STATE_UNHEALTHY = 2; // At least one observation reports unhealthy state.
+  SCALE_UP_FABRIC_HEALTH_STATE_UNAVAILABLE = 3; // A required health read failed.
+}
+
+// Credential-free discovered physical location. Absent fields are unknown, not zero.
+message ScaleUpFabricNodeLocation {
+  string node_id = 1; // Node identifier from the supplied inventory.
+  optional string chassis_serial_number = 2; // Discovered chassis identity, including nonnumeric serials.
+  optional uint32 tray_index = 3; // Discovered tray index when available.
+  optional uint32 slot_number = 4; // Discovered physical slot when available.
+}
+
+// Independently sampled health sources across one resolved fabric.
+// An unhealthy observation takes precedence over failed reads, then unknown state.
+message ScaleUpFabricHealthStatus {
+  ScaleUpFabricHealthState fabric_manager = 1; // GPU fabric-manager health, not inferred from controller state.
+  ScaleUpFabricHealthState switches = 2; // Aggregate switch health.
+  ScaleUpFabricHealthState links = 3; // Aggregate operational link health, not administrative state.
+  string error_message = 4; // Failed health reads, identifying affected nodes or interfaces.
+  ScaleUpFabricHealthState controller = 5; // Controller health, independently observed from configuration.
 }
 
 // BatchResetSwitchSdnFactoryDefaultRequest submits SDN factory-default resets for caller-supplied switches.
@@ -1369,6 +1529,14 @@ message BatchSetScaleUpFabricStateRequest {
 // BatchSetScaleUpFabricStateResponse reports the synchronous per-switch result.
 message BatchSetScaleUpFabricStateResponse {
   NodeBatchResponse response = 1; // response.job_id is unused and left empty for this synchronous RPC
+}
+
+// Administrative link readback; effective and operational state are distinct.
+enum ScaleUpFabricLinkState {
+  SCALE_UP_FABRIC_LINK_STATE_UNSPECIFIED = 0; // No conclusive administrative state was reported.
+  SCALE_UP_FABRIC_LINK_STATE_UP = 1; // Link is administratively up
+  SCALE_UP_FABRIC_LINK_STATE_DOWN = 2; // Link is administratively down
+  SCALE_UP_FABRIC_LINK_STATE_DEFAULT = 3; // Explicit configuration has no override; no effective state is implied.
 }
 
 // ScaleUpFabricServiceStatusEntry stores per-switch status keyed by node_id.

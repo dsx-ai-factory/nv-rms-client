@@ -342,6 +342,9 @@ pub trait RmsApi: Send + Sync + 'static {
 
     /// Retrieves the observed scale-up fabric state.
     ///
+    /// Inspection requests require a typed observation, including on partial failure.
+    /// The transport client returns `Unimplemented` when the server omits that observation.
+    ///
     /// Implementors may omit this method; the default returns `Unimplemented`.
     async fn get_scale_up_fabric_status(
         &self,
@@ -701,7 +704,17 @@ impl RmsApi for RackManagerApi {
         &self,
         cmd: rms::GetScaleUpFabricStatusRequest,
     ) -> Result<rms::GetScaleUpFabricStatusResponse, RackManagerError> {
-        Ok(self.client.get_scale_up_fabric_status(cmd).await?)
+        let inspection_requested = cmd.inspection.is_some();
+        let response = self.client.get_scale_up_fabric_status(cmd).await?;
+
+        if inspection_requested && response.observation.is_none() {
+            return Err(tonic::Status::unimplemented(
+                "GetScaleUpFabricStatus response omitted the requested live observation",
+            )
+            .into());
+        }
+
+        Ok(response)
     }
 
     async fn batch_reset_switch_sdn_factory_default(
