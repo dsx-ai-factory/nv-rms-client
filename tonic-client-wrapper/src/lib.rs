@@ -45,8 +45,15 @@ pub trait ConnectionProvider<T: Clone>: Send + Sync + std::fmt::Debug + 'static 
     fn connection_url(&self) -> &str;
 }
 
+/// Error returned by observer callbacks. The library logs it and carries on, so an
+/// observer failure never changes the outcome of the RPC being observed.
+pub type RpcObserverError = Box<dyn std::error::Error + Send + Sync>;
+
 /// Policy supplied by a caller for decoded unary RPC auditing. No metadata is exposed.
-/// Callbacks must redact sensitive payloads before recording and must not block.
+/// Callbacks must not block. Payload redaction is the responsibility of the implementor.
+///
+/// Callbacks report failures by returning `Err` rather than panicking. A failure is
+/// logged at `warn` level and the RPC proceeds exactly as if it were not observed.
 pub trait RpcObserver: Send + Sync + std::fmt::Debug {
     /// Whether this call should be observed. False avoids payload encoding and callbacks.
     /// Evaluated once at call start; an already-started observation always completes.
@@ -55,14 +62,15 @@ pub trait RpcObserver: Send + Sync + std::fmt::Debug {
     }
 
     /// Starts one logical RPC, before lazy connection setup. Names are protobuf names;
-    /// `request` is an unredacted protobuf message, not a gRPC frame.
+    /// `request` is an unredacted protobuf message, not a gRPC frame. If this returns
+    /// `Err`, the call is not observed and `RpcObservation::finish` is never invoked.
     fn start(
         &self,
         method: &'static str,
         request_type: &'static str,
         request: &[u8],
         started: std::time::SystemTime,
-    ) -> Box<dyn RpcObservation>;
+    ) -> Result<Box<dyn RpcObservation>, RpcObserverError>;
 }
 
 /// One in-flight RPC. Implement Drop if cancelled calls should also be recorded.
@@ -72,35 +80,41 @@ pub trait RpcObservation: Send {
 
     /// Records completion. Successful bodies are unredacted protobuf messages;
     /// failures expose only the status code, since status text may contain secrets.
+    /// An `Err` is logged and otherwise ignored.
     fn finish(
         &mut self,
         response_type: &'static str,
         response: Option<&[u8]>,
         code: tonic::Code,
         finished: std::time::SystemTime,
-    );
+    ) -> Result<(), RpcObserverError>;
 }
 
 /// Starts auditing only when a provider has an observer; otherwise no encoding is done.
+/// An observer error is logged and yields `None`, leaving the call unobserved.
 pub fn start_rpc<M: prost::Message>(
     observer: Option<&dyn RpcObserver>,
     method: &'static str,
     request_type: &'static str,
     request: &M,
 ) -> Option<Box<dyn RpcObservation>> {
-    observer
-        .filter(|observer| observer.enabled())
-        .map(|observer| {
-            observer.start(
-                method,
-                request_type,
-                &request.encode_to_vec(),
-                std::time::SystemTime::now(),
-            )
-        })
+    let observer = observer.filter(|observer| observer.enabled())?;
+    match observer.start(
+        method,
+        request_type,
+        &request.encode_to_vec(),
+        std::time::SystemTime::now(),
+    ) {
+        Ok(observation) => Some(observation),
+        Err(error) => {
+            tracing::warn!(method, %error, "RPC observer failed to start; call is unobserved");
+            None
+        }
+    }
 }
 
 /// Polls the RPC under the observer's span and reports its unchanged result.
+/// An observer error from `finish` is logged and never alters the result.
 pub async fn finish_rpc<M: prost::Message, E>(
     mut observation: Option<Box<dyn RpcObservation>>,
     response_type: &'static str,
@@ -117,7 +131,9 @@ pub async fn finish_rpc<M: prost::Message, E>(
         let finished = std::time::SystemTime::now();
         let payload = result.as_ref().ok().map(prost::Message::encode_to_vec);
         let code = result.as_ref().err().map_or(tonic::Code::Ok, status_code);
-        observation.finish(response_type, payload.as_deref(), code, finished);
+        if let Err(error) = observation.finish(response_type, payload.as_deref(), code, finished) {
+            tracing::warn!(response_type, %error, "RPC observer failed to record completion");
+        }
     }
     result
 }

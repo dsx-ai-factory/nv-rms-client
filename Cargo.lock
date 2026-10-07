@@ -578,7 +578,7 @@ checksum = "459427e2af2b9c839b132acb702a1c654d95e10f8c326bfc2ad11310e458b1c5"
 
 [[package]]
 name = "librms"
-version = "0.0.14"
+version = "0.0.15"
 dependencies = [
  "async-trait",
  "chrono",
@@ -1258,7 +1258,7 @@ dependencies = [
 
 [[package]]
 name = "tonic-client-wrapper"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "async-trait",
  "heck",

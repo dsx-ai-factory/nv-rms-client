@@ -15,6 +15,7 @@
 #![cfg(feature = "client")]
 
 use std::convert::Infallible;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 
@@ -26,13 +27,15 @@ use librms::client_config::RmsClientConfig;
 use librms::protos::rack_manager as rms;
 use librms::protos::rack_manager_v2 as rms_v2;
 use librms::protos::rack_manager_v2_client::RackManagerV2ApiClient;
-use librms::{RackManagerApi, RmsApi, RpcObservation, RpcObserver};
+use librms::{RackManagerApi, RmsApi, RpcObservation, RpcObserver, RpcObserverError};
 use prost::Message;
 use tower::{Service, ServiceExt};
 
 #[derive(Debug, Default)]
 struct Capture {
     records: Arc<Mutex<Vec<Record>>>,
+    /// Methods whose observation was dropped without `finish` being called.
+    cancelled: Arc<Mutex<Vec<&'static str>>>,
 }
 
 #[derive(Debug)]
@@ -49,7 +52,16 @@ struct Record {
 
 struct Observation {
     capture: Arc<Mutex<Vec<Record>>>,
+    cancelled: Arc<Mutex<Vec<&'static str>>>,
     record: Option<Record>,
+}
+
+impl Drop for Observation {
+    fn drop(&mut self) {
+        if let Some(record) = self.record.take() {
+            self.cancelled.lock().unwrap().push(record.method);
+        }
+    }
 }
 
 impl RpcObserver for Capture {
@@ -59,9 +71,10 @@ impl RpcObserver for Capture {
         request_type: &'static str,
         request: &[u8],
         started: SystemTime,
-    ) -> Box<dyn RpcObservation> {
-        Box::new(Observation {
+    ) -> Result<Box<dyn RpcObservation>, RpcObserverError> {
+        Ok(Box::new(Observation {
             capture: self.records.clone(),
+            cancelled: self.cancelled.clone(),
             record: Some(Record {
                 method,
                 request_type,
@@ -72,7 +85,7 @@ impl RpcObserver for Capture {
                 started,
                 finished: started,
             }),
-        })
+        }))
     }
 }
 
@@ -86,18 +99,21 @@ impl RpcObservation for Observation {
         response: Option<&[u8]>,
         code: tonic::Code,
         finished: SystemTime,
-    ) {
+    ) -> Result<(), RpcObserverError> {
         let mut record = self.record.take().unwrap();
         record.response_type = response_type;
         record.response = response.map(<[u8]>::to_vec);
         record.code = code;
         record.finished = finished;
         self.capture.lock().unwrap().push(record);
+        Ok(())
     }
 }
 
 #[derive(Debug)]
-struct Disabled;
+struct Disabled {
+    started: Arc<AtomicUsize>,
+}
 
 impl RpcObserver for Disabled {
     fn enabled(&self) -> bool {
@@ -109,8 +125,55 @@ impl RpcObserver for Disabled {
         _: &'static str,
         _: &[u8],
         _: SystemTime,
-    ) -> Box<dyn RpcObservation> {
-        panic!("disabled observer must not be called")
+    ) -> Result<Box<dyn RpcObservation>, RpcObserverError> {
+        self.started.fetch_add(1, Ordering::SeqCst);
+        Err("disabled observer must not be called".into())
+    }
+}
+
+/// Observer whose callbacks always fail; RPCs must be unaffected.
+#[derive(Debug, Default)]
+struct Failing {
+    fail_start: bool,
+    starts: Arc<AtomicUsize>,
+    finishes: Arc<AtomicUsize>,
+}
+
+struct FailingObservation {
+    finishes: Arc<AtomicUsize>,
+}
+
+impl RpcObserver for Failing {
+    fn start(
+        &self,
+        _: &'static str,
+        _: &'static str,
+        _: &[u8],
+        _: SystemTime,
+    ) -> Result<Box<dyn RpcObservation>, RpcObserverError> {
+        self.starts.fetch_add(1, Ordering::SeqCst);
+        if self.fail_start {
+            return Err("start failed".into());
+        }
+        Ok(Box::new(FailingObservation {
+            finishes: self.finishes.clone(),
+        }))
+    }
+}
+
+impl RpcObservation for FailingObservation {
+    fn span(&self) -> tracing::Span {
+        tracing::Span::none()
+    }
+    fn finish(
+        &mut self,
+        _: &'static str,
+        _: Option<&[u8]>,
+        _: tonic::Code,
+        _: SystemTime,
+    ) -> Result<(), RpcObserverError> {
+        self.finishes.fetch_add(1, Ordering::SeqCst);
+        Err("finish failed".into())
     }
 }
 
@@ -247,14 +310,53 @@ async fn real_unary_transport_preserves_payloads_and_observes_v1_v2_and_status()
         assert_eq!(records[1].code, tonic::Code::PermissionDenied);
         assert!(records[1].response.is_none());
         assert_eq!(records[2].method, "ConfigureScaleUpFabricManager");
+        assert_eq!(
+            records[2].request_type,
+            "rack_manager_v2.ConfigureScaleUpFabricManagerRequest"
+        );
+        assert_eq!(
+            records[2].response_type,
+            "rack_manager_v2.ConfigureScaleUpFabricManagerResponse"
+        );
+        assert_eq!(records[2].code, tonic::Code::Ok);
+        assert_eq!(
+            rms_v2::ConfigureScaleUpFabricManagerResponse::decode(
+                records[2].response.as_deref().unwrap()
+            )
+            .unwrap(),
+            response
+        );
+        // The `RackManagerApi` V2 entry point is observed like the generated wrapper.
+        assert_eq!(records[3].method, "ConfigureScaleUpFabricManager");
+        assert_eq!(
+            records[3].request_type,
+            "rack_manager_v2.ConfigureScaleUpFabricManagerRequest"
+        );
+        assert_eq!(
+            records[3].response_type,
+            "rack_manager_v2.ConfigureScaleUpFabricManagerResponse"
+        );
+        assert_eq!(records[3].code, tonic::Code::Ok);
+        assert_eq!(
+            rms_v2::ConfigureScaleUpFabricManagerResponse::decode(
+                records[3].response.as_deref().unwrap()
+            )
+            .unwrap(),
+            via_api
+        );
+        assert!(capture.cancelled.lock().unwrap().is_empty());
         for record in records.iter() {
             assert!(record.finished >= record.started);
         }
     }
-    config.rpc_observer = Some(Arc::new(Disabled));
+    let disabled_starts = Arc::new(AtomicUsize::new(0));
+    config.rpc_observer = Some(Arc::new(Disabled {
+        started: disabled_starts.clone(),
+    }));
     let unobserved = RackManagerApi::new(&RmsApiConfig::new(&url, &config));
     assert_eq!(unobserved.client.get_version().await.unwrap(), version);
     assert_eq!(capture.records.lock().unwrap().len(), 4);
+    assert_eq!(disabled_starts.load(Ordering::SeqCst), 0);
     server.abort();
 }
 
@@ -273,4 +375,75 @@ async fn lazy_connection_failure_is_observed_once() {
     assert_eq!(records.len(), 1);
     assert_eq!(records[0].code, tonic::Code::Unavailable);
     assert!(records[0].response.is_none());
+}
+
+/// Serves HTTP/2 on a local port; `GetVersion` succeeds, every other RPC never responds.
+async fn spawn_server(hang_all: bool) -> (String, tokio::task::JoinHandle<()>) {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    let server = tokio::spawn(async move {
+        loop {
+            let (socket, _) = listener.accept().await.unwrap();
+            tokio::spawn(async move {
+                let service =
+                    hyper::service::service_fn(move |_: hyper::Request<Incoming>| async move {
+                        if hang_all {
+                            std::future::pending::<()>().await;
+                        }
+                        Ok::<_, Infallible>(grpc_response(rms::GetVersionResponse {
+                            version: "test-version".to_string(),
+                        }))
+                    });
+                let _ = hyper::server::conn::http2::Builder::new(TokioExecutor::new())
+                    .serve_connection(TokioIo::new(socket), service)
+                    .await;
+            });
+        }
+    });
+    (url, server)
+}
+
+#[tokio::test]
+async fn cancelled_call_drops_observation_without_finish() {
+    let (url, server) = spawn_server(true).await;
+    let capture = Arc::new(Capture::default());
+    let mut config = RmsClientConfig::new(None, None, None, false);
+    config.rpc_observer = Some(capture.clone());
+    let api_config = RmsApiConfig::new(&url, &config).with_retry_config(RetryConfig {
+        retries: 0,
+        interval: Duration::ZERO,
+    });
+    let api = RackManagerApi::new(&api_config);
+
+    let outcome = tokio::time::timeout(Duration::from_millis(200), api.client.get_version()).await;
+    assert!(
+        outcome.is_err(),
+        "call should have been cancelled by the timeout"
+    );
+
+    assert!(capture.records.lock().unwrap().is_empty());
+    assert_eq!(*capture.cancelled.lock().unwrap(), vec!["GetVersion"]);
+    server.abort();
+}
+
+#[tokio::test]
+async fn observer_errors_never_affect_the_rpc() {
+    let (url, server) = spawn_server(false).await;
+    for fail_start in [true, false] {
+        let failing = Arc::new(Failing {
+            fail_start,
+            ..Default::default()
+        });
+        let mut config = RmsClientConfig::new(None, None, None, false);
+        config.rpc_observer = Some(failing.clone());
+        let api = RackManagerApi::new(&RmsApiConfig::new(&url, &config));
+
+        let version = api.client.get_version().await.unwrap();
+        assert_eq!(version.version, "test-version");
+        assert_eq!(failing.starts.load(Ordering::SeqCst), 1);
+        // A failed start means the call is unobserved, so finish is never reached.
+        let expected_finishes = if fail_start { 0 } else { 1 };
+        assert_eq!(failing.finishes.load(Ordering::SeqCst), expected_finishes);
+    }
+    server.abort();
 }
