@@ -159,43 +159,45 @@ mod proto_model_tests {
     }
 
     #[test]
-    fn switch_system_image_requests_preserve_optional_bool_wire_contract() {
+    fn switch_system_image_requests_encode_allow_onie_recovery_as_plain_bool() {
         let stored_request = ApplyStoredSwitchSystemImageRequest {
-            allow_onie_recovery: Some(false),
+            allow_onie_recovery: true,
             ..Default::default()
         };
 
         let direct_request = ApplySwitchSystemImageRequest {
-            allow_onie_recovery: Some(false),
+            allow_onie_recovery: true,
             ..Default::default()
         };
 
         let update_request = UpdateSwitchSystemImageRequest {
-            allow_onie_recovery: Some(false),
+            allow_onie_recovery: true,
             ..Default::default()
         };
 
-        let stored_encoded = stored_request.encode_to_vec();
-        let direct_encoded = direct_request.encode_to_vec();
-        let update_encoded = update_request.encode_to_vec();
+        // A set flag is encoded under the field's tag (7, 8 and 5 respectively).
+        assert_eq!(stored_request.encode_to_vec(), [0x38, 0x01]);
+        assert_eq!(direct_request.encode_to_vec(), [0x40, 0x01]);
+        assert_eq!(update_request.encode_to_vec(), [0x28, 0x01]);
 
-        assert_eq!(stored_encoded, [0x38, 0x00]);
-        assert_eq!(direct_encoded, [0x40, 0x00]);
-        assert_eq!(update_encoded, [0x28, 0x00]);
-
-        assert_eq!(
-            ApplyStoredSwitchSystemImageRequest::default().allow_onie_recovery,
-            None
+        // The field is a plain proto3 bool: false is the default and is not encoded, so an
+        // explicit false is indistinguishable from an unset value on the wire.
+        assert!(!ApplyStoredSwitchSystemImageRequest::default().allow_onie_recovery);
+        assert!(!ApplySwitchSystemImageRequest::default().allow_onie_recovery);
+        assert!(!UpdateSwitchSystemImageRequest::default().allow_onie_recovery);
+        assert!(
+            ApplyStoredSwitchSystemImageRequest {
+                allow_onie_recovery: false,
+                ..Default::default()
+            }
+            .encode_to_vec()
+            .is_empty()
         );
 
-        assert_eq!(
-            ApplySwitchSystemImageRequest::default().allow_onie_recovery,
-            None
-        );
-
-        assert_eq!(
-            UpdateSwitchSystemImageRequest::default().allow_onie_recovery,
-            None
+        assert!(
+            ApplyStoredSwitchSystemImageRequest::decode(stored_request.encode_to_vec().as_slice())
+                .unwrap()
+                .allow_onie_recovery
         );
     }
 
