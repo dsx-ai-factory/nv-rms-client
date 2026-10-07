@@ -244,6 +244,15 @@ async fn real_unary_transport_preserves_payloads_and_observes_v1_v2_and_status()
                                     job_id: "job-42".to_string(),
                                 })
                             }
+                            "/rack_manager_v2.RackManagerV2/StartSystemValidation" => {
+                                grpc_response(rms_v2::StartSystemValidationResponse {
+                                    response: Some(rms::NodeBatchResponse {
+                                        job_id: "validation-7".to_string(),
+                                        ..Default::default()
+                                    }),
+                                    ..Default::default()
+                                })
+                            }
                             _ => panic!("unexpected RPC {path}"),
                         };
                         Ok::<_, Infallible>(response)
@@ -290,9 +299,15 @@ async fn real_unary_transport_preserves_payloads_and_observes_v1_v2_and_status()
         .await
         .unwrap();
     assert_eq!(via_api, response);
+    let validation_request = rms_v2::StartSystemValidationRequest::default();
+    let validation = api
+        .start_system_validation(validation_request.clone())
+        .await
+        .unwrap();
+    assert_eq!(validation.response.as_ref().unwrap().job_id, "validation-7");
     {
         let records = capture.records.lock().unwrap();
-        assert_eq!(records.len(), 4); // Readiness probes are transport calls, not logical wrapper calls.
+        assert_eq!(records.len(), 5); // Readiness probes are transport calls, not logical wrapper calls.
         assert_eq!(records[0].method, "GetVersion");
         assert_eq!(records[0].response_type, "rack_manager.GetVersionResponse");
         assert_eq!(
@@ -344,6 +359,26 @@ async fn real_unary_transport_preserves_payloads_and_observes_v1_v2_and_status()
             .unwrap(),
             via_api
         );
+        // The second `RackManagerApi` V2 entry point is observed too.
+        assert_eq!(records[4].method, "StartSystemValidation");
+        assert_eq!(
+            records[4].request_type,
+            "rack_manager_v2.StartSystemValidationRequest"
+        );
+        assert_eq!(
+            rms_v2::StartSystemValidationRequest::decode(records[4].request.as_slice()).unwrap(),
+            validation_request
+        );
+        assert_eq!(
+            records[4].response_type,
+            "rack_manager_v2.StartSystemValidationResponse"
+        );
+        assert_eq!(records[4].code, tonic::Code::Ok);
+        assert_eq!(
+            rms_v2::StartSystemValidationResponse::decode(records[4].response.as_deref().unwrap())
+                .unwrap(),
+            validation
+        );
         assert!(capture.cancelled.lock().unwrap().is_empty());
         for record in records.iter() {
             assert!(record.finished >= record.started);
@@ -355,7 +390,7 @@ async fn real_unary_transport_preserves_payloads_and_observes_v1_v2_and_status()
     }));
     let unobserved = RackManagerApi::new(&RmsApiConfig::new(&url, &config));
     assert_eq!(unobserved.client.get_version().await.unwrap(), version);
-    assert_eq!(capture.records.lock().unwrap().len(), 4);
+    assert_eq!(capture.records.lock().unwrap().len(), 5);
     assert_eq!(disabled_starts.load(Ordering::SeqCst), 0);
     server.abort();
 }

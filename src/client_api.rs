@@ -695,15 +695,31 @@ impl RmsApi for RackManagerApi {
         &self,
         cmd: rms_v2::StartSystemValidationRequest,
     ) -> Result<rms_v2::StartSystemValidationResponse, RackManagerError> {
-        // Reuse the V1 provider's configured readiness and retry policy before calling V2.
-        let _ = self.client.connection().await?;
-
-        let mut client_v2 = RmsTlsClient::new(&self.config).build_rms_client_v2(&self.api_url)?;
-
-        Ok(client_v2
-            .start_system_validation(tonic::Request::new(cmd))
-            .await?
-            .into_inner())
+        let observation = tonic_client_wrapper::start_rpc(
+            self.config.rpc_observer.as_deref(),
+            "StartSystemValidation",
+            "rack_manager_v2.StartSystemValidationRequest",
+            &cmd,
+        );
+        tonic_client_wrapper::finish_rpc(
+            observation,
+            "rack_manager_v2.StartSystemValidationResponse",
+            async {
+                // Preserve the shared V1 readiness/retry policy before constructing the V2 client.
+                let _ = self.client.connection().await?;
+                let mut client_v2 =
+                    RmsTlsClient::new(&self.config).build_rms_client_v2(&self.api_url)?;
+                Ok(client_v2
+                    .start_system_validation(tonic::Request::new(cmd))
+                    .await?
+                    .into_inner())
+            },
+            |error: &RackManagerError| match error {
+                RackManagerError::ApiInvocationError(status) => status.code(),
+                RackManagerError::TlsError(_) => tonic::Code::Unavailable,
+            },
+        )
+        .await
     }
 
     async fn configure_scale_up_fabric_manager(
