@@ -242,6 +242,7 @@ async fn real_unary_transport_preserves_payloads_and_observes_v1_v2_and_status()
                             "/rack_manager_v2.RackManagerV2/ConfigureScaleUpFabricManager" => {
                                 grpc_response(rms_v2::ConfigureScaleUpFabricManagerResponse {
                                     job_id: "job-42".to_string(),
+                                    ..Default::default()
                                 })
                             }
                             "/rack_manager_v2.RackManagerV2/StartSystemValidation" => {
