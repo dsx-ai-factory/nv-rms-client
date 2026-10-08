@@ -574,6 +574,9 @@ service RackManager {
    * preserved, not rotated. If the supplied switch credentials do not work, RMS
    * falls back to the factory default password to perform the reset, without
    * assuming a switch was already reset just because the default login works.
+   * Set allow_expired_nvue_server_certificate to allow an HTTPS fallback with
+   * expiry-only certificate validation when the NVUE server certificate has expired.
+   * This fallback is disabled by default.
    */
   rpc BatchResetSwitchFactoryDefault(BatchResetSwitchFactoryDefaultRequest) returns (BatchResetSwitchFactoryDefaultResponse) {}
 
@@ -1574,6 +1577,7 @@ message PushSwitchFirmwareResponse {
 message BatchResetSwitchFactoryDefaultRequest {
   NodeSet nodes = 1; // Target switch identities and direct connection information
   optional string domain = 2; // Optional domain for the target switch group; defaults to configured switch domain when unset
+  bool allow_expired_nvue_server_certificate = 3; // Allow HTTPS fallback with expiry-only certificate validation for an expired NVUE server certificate; defaults to false
 }
 
 // BatchResetSwitchFactoryDefaultResponse reports asynchronous reset submission status.

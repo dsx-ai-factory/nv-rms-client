@@ -304,6 +304,10 @@ pub trait RmsApi: Send + Sync + 'static {
 
     /// Submits asynchronous NVOS factory-default resets for the given switches.
     ///
+    /// Set `cmd.allow_expired_nvue_server_certificate` to allow HTTPS fallback with
+    /// expiry-only certificate validation when the NVUE server certificate has expired.
+    /// The fallback is disabled by default.
+    ///
     /// Implementors may omit this method; the default returns `Unimplemented`.
     async fn batch_reset_switch_factory_default(
         &self,
