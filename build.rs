@@ -45,6 +45,7 @@ const FABRIC_SERDE_FIELD_ATTRIBUTES: &[(&str, &[&str])] = &[
             "rack_manager.ScaleUpFabricMemberObservation.raw_device_health",
             "rack_manager.ScaleUpFabricMemberObservation.raw_node_health",
             "rack_manager_v2.ConfigureScaleUpFabricManagerRequest.layout",
+            "rack_manager_v2.ConfigureScaleUpFabricManagerRequest.compute_nodes",
             "rack_manager.ScaleUpFabricNodeLocation.chassis_serial_number",
             "rack_manager.ScaleUpFabricNodeLocation.tray_index",
             "rack_manager.ScaleUpFabricNodeLocation.slot_number",
@@ -55,13 +56,9 @@ const FABRIC_SERDE_FIELD_ATTRIBUTES: &[(&str, &[&str])] = &[
         r#"#[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "Vec::is_empty"))]"#,
         &[
             "rack_manager_v2.ConfigureScaleUpFabricManagerResponse.resolved_fabrics",
-            "rack_manager_v2.ScaleUpFabricSpec.compute_node_ids",
-            "rack_manager_v2.ScaleUpFabricSpec.switch_node_ids",
+            "rack_manager_v2.ScaleUpFabricAssignment.compute_node_ids",
+            "rack_manager_v2.ScaleUpFabricAssignment.switch_node_ids",
         ],
-    ),
-    (
-        r#"#[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "std::ops::Not::not"))]"#,
-        &["rack_manager_v2.ConfigureScaleUpFabricManagerRequest.reset_fabric_config"],
     ),
     (
         r#"#[cfg_attr(feature = "serde", serde(default, with = "crate::timestamp_serde", skip_serializing_if = "Option::is_none"))]"#,

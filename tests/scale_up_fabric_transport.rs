@@ -30,6 +30,7 @@ mod client_tests {
         submissions: Vec<v2::ConfigureScaleUpFabricManagerRequest>,
         delay: Duration,
         status_response: rm::GetScaleUpFabricStatusResponse,
+        configure_response: v2::ConfigureScaleUpFabricManagerResponse,
     }
 
     struct VersionRpc;
@@ -57,23 +58,18 @@ mod client_tests {
             &mut self,
             request: tonic::Request<v2::ConfigureScaleUpFabricManagerRequest>,
         ) -> Self::Future {
-            let delay = {
+            let (delay, response) = {
                 let mut state = self.0.lock().unwrap();
 
                 state.submissions.push(request.into_inner());
 
-                state.delay
+                (state.delay, state.configure_response.clone())
             };
 
             Box::pin(async move {
                 tokio::time::sleep(delay).await;
 
-                Ok(tonic::Response::new(
-                    v2::ConfigureScaleUpFabricManagerResponse {
-                        job_id: "accepted-job".to_owned(),
-                        ..Default::default()
-                    },
-                ))
+                Ok(tonic::Response::new(response))
             })
         }
     }
@@ -171,14 +167,6 @@ mod client_tests {
         }
     }
 
-    fn request(layout: bool, reset: bool) -> v2::ConfigureScaleUpFabricManagerRequest {
-        v2::ConfigureScaleUpFabricManagerRequest {
-            layout: layout.then(v2::ScaleUpFabricLayout::default),
-            reset_fabric_config: reset,
-            ..Default::default()
-        }
-    }
-
     #[tokio::test]
     async fn client_requires_observation_only_for_inspection_including_failed_responses() {
         for (inspection_requested, observation_present, status) in [
@@ -237,13 +225,118 @@ mod client_tests {
     }
 
     #[tokio::test]
-    async fn configuration_requests_forward_layout_restoration_and_legacy_unchanged() {
-        for command in [
-            request(true, false),
-            request(false, true),
-            request(false, false),
+    async fn configuration_requests_forward_inventory_layouts_and_return_assignments() {
+        let nodes = rm::NodeSet {
+            nodes: ["switch-1", "switch-2"]
+                .into_iter()
+                .map(|node_id| rm::NodeInfo {
+                    node_id: node_id.to_owned(),
+                    ..Default::default()
+                })
+                .collect(),
+        };
+
+        let compute_nodes = rm::NodeSet {
+            nodes: ["compute-1", "compute-2", "compute-3", "compute-4"]
+                .into_iter()
+                .map(|node_id| rm::NodeInfo {
+                    node_id: node_id.to_owned(),
+                    ..Default::default()
+                })
+                .collect(),
+        };
+
+        let partial_layout = v2::ScaleUpFabricLayout {
+            fabrics: ["switch-2", "switch-1"]
+                .into_iter()
+                .map(|primary| v2::ScaleUpFabricSpec {
+                    compute_tray_count: 2,
+                    switch_tray_count: 1,
+                    primary_switch_node_id: Some(primary.to_owned()),
+                })
+                .collect(),
+        };
+
+        let full_layout = v2::ScaleUpFabricLayout {
+            fabrics: vec![v2::ScaleUpFabricSpec {
+                compute_tray_count: 4,
+                switch_tray_count: 2,
+                primary_switch_node_id: None,
+            }],
+        };
+
+        let full_assignment = v2::ScaleUpFabricAssignment {
+            compute_node_ids: compute_nodes
+                .nodes
+                .iter()
+                .map(|node| node.node_id.clone())
+                .collect(),
+            switch_node_ids: vec!["switch-1".to_owned(), "switch-2".to_owned()],
+            primary_switch_node_id: "switch-1".to_owned(),
+        };
+
+        for (name, layout, with_computes, assignments) in [
+            ("legacy", None, false, vec![]),
+            (
+                "partial",
+                Some(partial_layout),
+                true,
+                vec![
+                    v2::ScaleUpFabricAssignment {
+                        compute_node_ids: vec!["compute-3".to_owned(), "compute-4".to_owned()],
+                        switch_node_ids: vec!["switch-2".to_owned()],
+                        primary_switch_node_id: "switch-2".to_owned(),
+                    },
+                    v2::ScaleUpFabricAssignment {
+                        compute_node_ids: vec!["compute-1".to_owned(), "compute-2".to_owned()],
+                        switch_node_ids: vec!["switch-1".to_owned()],
+                        primary_switch_node_id: "switch-1".to_owned(),
+                    },
+                ],
+            ),
+            (
+                "full",
+                Some(full_layout.clone()),
+                true,
+                vec![full_assignment.clone()],
+            ),
+            (
+                "full_without_computes",
+                Some(full_layout),
+                false,
+                vec![v2::ScaleUpFabricAssignment {
+                    compute_node_ids: vec![],
+                    ..full_assignment
+                }],
+            ),
         ] {
-            let fixture = Fixture::new(State::default()).await;
+            let command = v2::ConfigureScaleUpFabricManagerRequest {
+                nodes: Some(nodes.clone()),
+                primary_switch_node_id: layout.is_none().then(|| "switch-2".to_owned()),
+                domain: Some("fixture.example".to_owned()),
+                config: Some(v2::ScaleUpFabricConfig {
+                    topology_type: "fixture-topology".to_owned(),
+                    extra_static_configs: vec![rm::ScaleUpFabricStaticConfig {
+                        config_file_name: "fabric.conf".to_owned(),
+                        key: "fixture-setting".to_owned(),
+                        value: "enabled".to_owned(),
+                    }],
+                }),
+                layout,
+                compute_nodes: with_computes.then(|| compute_nodes.clone()),
+            };
+
+            let expected_response = v2::ConfigureScaleUpFabricManagerResponse {
+                job_id: format!("accepted-{name}"),
+                resolved_fabrics: assignments,
+            };
+
+            let fixture = Fixture::new(State {
+                configure_response: expected_response.clone(),
+                ..Default::default()
+            })
+            .await;
+
             let client = fixture.client(&RmsClientConfig::new(None, None, None, false));
 
             let response = client
@@ -251,8 +344,13 @@ mod client_tests {
                 .await
                 .unwrap();
 
-            assert_eq!(response.job_id, "accepted-job");
-            assert_eq!(fixture.state.lock().unwrap().submissions, vec![command]);
+            assert_eq!(response, expected_response, "{name}");
+
+            assert_eq!(
+                fixture.state.lock().unwrap().submissions,
+                vec![command],
+                "{name}"
+            );
         }
     }
 }
