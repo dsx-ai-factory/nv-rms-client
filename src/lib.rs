@@ -68,6 +68,13 @@ pub(crate) use client::{RackManagerClientT, RackManagerV2ClientT};
 #[cfg(feature = "client")]
 pub use client_api::*;
 
+/// Unary RPC observation contracts for consumers supplying auditing policy.
+#[cfg(feature = "client")]
+pub use tonic_client_wrapper::{RpcObservation, RpcObserver, RpcObserverError};
+
+/// Descriptor set for decoding RMS V1 and V2 messages without client transport dependencies.
+pub const FILE_DESCRIPTOR_SET: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/rms.bin"));
+
 #[cfg(test)]
 mod proto_model_tests {
     use prost::Message as _;

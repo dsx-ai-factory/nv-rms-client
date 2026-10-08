@@ -947,19 +947,21 @@ dependencies = [
 
 [[package]]
 name = "tonic-client-wrapper"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "async-trait",
  "heck",
  "lazy_static",
  "prettyplease",
  "proc-macro2",
+ "prost",
  "prost-types",
  "quote",
  "syn",
  "thiserror",
  "tonic",
  "tonic-prost-build",
+ "tracing",
 ]
 
 [[package]]

@@ -38,6 +38,10 @@ pub struct ClientCert {
 
 #[derive(Clone, Debug, Default)]
 pub struct RmsClientConfig {
+    /// Optional caller-owned HTTP transport layer, disabled by default.
+    pub transport_layer: Option<std::sync::Arc<dyn crate::client::RmsTransportLayer>>,
+    /// Optional decoded unary RPC observer, disabled by default. Shared by cloned clients.
+    pub rpc_observer: Option<std::sync::Arc<dyn tonic_client_wrapper::RpcObserver>>,
     pub root_ca_path: Option<String>,
     pub client_cert: Option<ClientCert>,
     pub enforce_tls: bool,
@@ -118,6 +122,8 @@ impl RmsClientConfig {
             .and_then(|ms| ms.parse::<usize>().ok());
 
         Self {
+            transport_layer: None,
+            rpc_observer: None,
             root_ca_path,
             client_cert,
             enforce_tls: can_enforce_tls,

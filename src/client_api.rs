@@ -141,6 +141,56 @@ impl RackManagerApi {
             api_url: rms_api_config.url.to_string(),
         }
     }
+
+    /// Issues one unary RackManagerV2 RPC with the configured `RpcObserver`
+    /// (`RmsClientConfig::rpc_observer`) attached.
+    ///
+    /// Every direct V2 call made by `RackManagerApi` must go through this helper so that it
+    /// is observed consistently. It preserves the shared V1 readiness/retry policy by
+    /// establishing the V1 connection first, builds a V2 client, and reports
+    /// `RackManagerError::TlsError` to the observer as `Unavailable`.
+    ///
+    /// `method`, `request_type` and `response_type` are the protobuf names reported to the
+    /// observer (for example `"rack_manager_v2.StartSystemValidationRequest"`). `call`
+    /// receives an owned V2 client and the request, and performs the generated client call.
+    async fn observed_v2_unary<Req, Resp, Call, Fut>(
+        &self,
+        method: &'static str,
+        request_type: &'static str,
+        response_type: &'static str,
+        request: Req,
+        call: Call,
+    ) -> Result<Resp, RackManagerError>
+    where
+        Req: prost::Message,
+        Resp: prost::Message,
+        Call: FnOnce(RackManagerV2ClientT, tonic::Request<Req>) -> Fut,
+        Fut: std::future::Future<Output = Result<tonic::Response<Resp>, Status>>,
+    {
+        let observation = tonic_client_wrapper::start_rpc(
+            self.config.rpc_observer.as_deref(),
+            method,
+            request_type,
+            &request,
+        );
+        tonic_client_wrapper::finish_rpc(
+            observation,
+            response_type,
+            async {
+                let _ = self.client.connection().await?;
+                let client_v2 =
+                    RmsTlsClient::new(&self.config).build_rms_client_v2(&self.api_url)?;
+                Ok(call(client_v2, tonic::Request::new(request))
+                    .await?
+                    .into_inner())
+            },
+            |error: &RackManagerError| match error {
+                RackManagerError::ApiInvocationError(status) => status.code(),
+                RackManagerError::TlsError(_) => tonic::Code::Unavailable,
+            },
+        )
+        .await
+    }
 }
 
 // declare the functions
@@ -664,30 +714,30 @@ impl RmsApi for RackManagerApi {
         &self,
         cmd: rms_v2::ConfigureScaleUpFabricManagerRequest,
     ) -> Result<rms_v2::ConfigureScaleUpFabricManagerResponse, RackManagerError> {
-        // Reuse the V1 provider's configured readiness and retry policy before calling V2.
-        let _ = self.client.connection().await?;
-
-        let mut client_v2 = RmsTlsClient::new(&self.config).build_rms_client_v2(&self.api_url)?;
-
-        Ok(client_v2
-            .configure_scale_up_fabric_manager(tonic::Request::new(cmd))
-            .await?
-            .into_inner())
+        self.observed_v2_unary(
+            "ConfigureScaleUpFabricManager",
+            "rack_manager_v2.ConfigureScaleUpFabricManagerRequest",
+            "rack_manager_v2.ConfigureScaleUpFabricManagerResponse",
+            cmd,
+            |mut client, request| async move {
+                client.configure_scale_up_fabric_manager(request).await
+            },
+        )
+        .await
     }
 
     async fn start_system_validation(
         &self,
         cmd: rms_v2::StartSystemValidationRequest,
     ) -> Result<rms_v2::StartSystemValidationResponse, RackManagerError> {
-        // Reuse the V1 provider's configured readiness and retry policy before calling V2.
-        let _ = self.client.connection().await?;
-
-        let mut client_v2 = RmsTlsClient::new(&self.config).build_rms_client_v2(&self.api_url)?;
-
-        Ok(client_v2
-            .start_system_validation(tonic::Request::new(cmd))
-            .await?
-            .into_inner())
+        self.observed_v2_unary(
+            "StartSystemValidation",
+            "rack_manager_v2.StartSystemValidationRequest",
+            "rack_manager_v2.StartSystemValidationResponse",
+            cmd,
+            |mut client, request| async move { client.start_system_validation(request).await },
+        )
+        .await
     }
 
     async fn configure_scale_up_fabric_manager(
@@ -884,6 +934,10 @@ impl tonic_client_wrapper::ConnectionProvider<RackManagerClientT> for RmsTlsConn
         }
     }
 
+    fn rpc_observer(&self) -> Option<&dyn tonic_client_wrapper::RpcObserver> {
+        self.client_config.rpc_observer.as_deref()
+    }
+
     fn connection_url(&self) -> &str {
         self.url.as_str()
     }
@@ -958,6 +1012,10 @@ impl tonic_client_wrapper::ConnectionProvider<RackManagerV2ClientT> for RmsTlsCo
         } else {
             false
         }
+    }
+
+    fn rpc_observer(&self) -> Option<&dyn tonic_client_wrapper::RpcObserver> {
+        self.client_config.rpc_observer.as_deref()
     }
 
     fn connection_url(&self) -> &str {

@@ -129,8 +129,8 @@ impl CodeGenerator {
             .proto_files
             .iter()
             .map(|proto_file| {
-                let proto_path = fs::canonicalize(proto_file)
-                    .unwrap_or_else(|_| PathBuf::from(proto_file));
+                let proto_path =
+                    fs::canonicalize(proto_file).unwrap_or_else(|_| PathBuf::from(proto_file));
 
                 all_proto_fds
                     .iter()
@@ -515,50 +515,43 @@ impl CodeGenerator {
                 Ok(token_stream)
             }
             (false, false) => {
-                // Unary - your existing code.
-                let token_stream = if input_type_str == "()" {
-                    quote! {
-                        pub async fn #method_name(&self) -> Result<#output_type, tonic::Status> {
-                            Ok(self
-                                .connection()
-                                .await?
-                                .#method_name(tonic::Request::new(()))
-                                .await?
-                                .into_inner())
-                        }
-                    }
+                let method_label = method.name();
+                let request_type = method.input_type().trim_start_matches('.');
+                let response_type = method.output_type().trim_start_matches('.');
+                let has_zero_fields = method
+                    .input_type
+                    .as_ref()
+                    .and_then(|t| self.message_types.get(t))
+                    .is_some_and(|t| t.message.field.is_empty());
+                let (signature, request) = if input_type_str == "()" {
+                    (
+                        quote! { pub async fn #method_name(&self) -> Result<#output_type, tonic::Status> },
+                        quote! { () },
+                    )
+                } else if has_zero_fields {
+                    (
+                        quote! { pub async fn #method_name(&self) -> Result<#output_type, tonic::Status> },
+                        quote! { #input_type {} },
+                    )
                 } else {
-                    let has_zero_fields = method
-                        .input_type
-                        .as_ref()
-                        .and_then(|t| self.message_types.get(t))
-                        .is_some_and(|t| t.message.field.is_empty());
-
-                    if has_zero_fields {
-                        quote! {
-                            pub async fn #method_name(&self) -> Result<#output_type, tonic::Status> {
-                                Ok(self
-                                    .connection()
-                                    .await?
-                                    .#method_name(tonic::Request::new(#input_type {}))
-                                    .await?
-                                    .into_inner())
-                            }
-                        }
-                    } else {
-                        quote! {
-                            pub async fn #method_name<T: Into<#input_type>>(&self, request: T) -> Result<#output_type, tonic::Status> {
-                                Ok(self
-                                    .connection()
-                                    .await?
-                                    .#method_name(tonic::Request::new(request.into()))
-                                    .await?
-                                    .into_inner())
-                            }
-                        }
-                    }
+                    (
+                        quote! { pub async fn #method_name<T: Into<#input_type>>(&self, request: T) -> Result<#output_type, tonic::Status> },
+                        quote! { request.into() },
+                    )
                 };
-                Ok(token_stream)
+                Ok(quote! {
+                    #signature {
+                        let request: #input_type = #request;
+                        let observation = ::tonic_client_wrapper::start_rpc(
+                            self.inner.connection_provider.rpc_observer(),
+                            #method_label, #request_type, &request,
+                        );
+                        ::tonic_client_wrapper::finish_rpc(observation, #response_type, async {
+                            Ok(self.connection().await?
+                                .#method_name(tonic::Request::new(request)).await?.into_inner())
+                        }, tonic::Status::code).await
+                    }
+                })
             }
         }
     }
@@ -695,8 +688,7 @@ mod tests {
 
     #[test]
     fn includes_rpc_methods_from_nested_target_proto() {
-        let fixture_root =
-            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/test_fixtures");
+        let fixture_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/test_fixtures");
 
         let proto_file = fixture_root.join("nested/test.proto");
 
@@ -709,12 +701,14 @@ mod tests {
             extern_paths: vec![],
         };
 
-        let generator =
-            CodeGenerator::new(cfg).expect("nested target fixture should load");
+        let generator = CodeGenerator::new(cfg).expect("nested target fixture should load");
 
         let methods = rpc_methods(&generator);
 
-        assert!(methods.contains_key("Ping"), "nested target RPC was omitted");
+        assert!(
+            methods.contains_key("Ping"),
+            "nested target RPC was omitted"
+        );
     }
 
     #[test]
@@ -731,12 +725,13 @@ mod tests {
                 name: "VoidRpc",
                 expected: quote! {
                     pub async fn void_rpc(&self) -> Result<crate::protos::test::SomeResponse, tonic::Status> {
-                        Ok(self
-                            .connection()
-                            .await?
-                            .void_rpc(tonic::Request::new(crate::protos::test::VoidRequest {}))
-                            .await?
-                            .into_inner())
+                        let request: crate::protos::test::VoidRequest = crate::protos::test::VoidRequest {};
+                        let observation = ::tonic_client_wrapper::start_rpc(
+                            self.inner.connection_provider.rpc_observer(), "VoidRpc", "test.VoidRequest", &request,
+                        );
+                        ::tonic_client_wrapper::finish_rpc(observation, "test.SomeResponse", async {
+                            Ok(self.connection().await?.void_rpc(tonic::Request::new(request)).await?.into_inner())
+                        }, tonic::Status::code).await
                     }
                 },
             },
@@ -744,12 +739,13 @@ mod tests {
                 name: "SingleMessageRpc",
                 expected: quote! {
                     pub async fn single_message_rpc<T: Into<crate::protos::test::SingleMessageRequest>>(&self, request: T) -> Result<crate::protos::test::SomeResponse, tonic::Status> {
-                        Ok(self
-                            .connection()
-                            .await?
-                            .single_message_rpc(tonic::Request::new(request.into()))
-                            .await?
-                            .into_inner())
+                        let request: crate::protos::test::SingleMessageRequest = request.into();
+                        let observation = ::tonic_client_wrapper::start_rpc(
+                            self.inner.connection_provider.rpc_observer(), "SingleMessageRpc", "test.SingleMessageRequest", &request,
+                        );
+                        ::tonic_client_wrapper::finish_rpc(observation, "test.SomeResponse", async {
+                            Ok(self.connection().await?.single_message_rpc(tonic::Request::new(request)).await?.into_inner())
+                        }, tonic::Status::code).await
                     }
                 },
             },
