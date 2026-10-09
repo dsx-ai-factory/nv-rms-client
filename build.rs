@@ -40,6 +40,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "rack_manager.NodeInfo.additional_host_endpoints",
             "#[cfg_attr(feature = \"serde\", serde(default, skip_serializing_if = \"Vec::is_empty\"))]",
         )
+        // Older serialized requests keep certificate fallback disabled when the field is absent.
+        .field_attribute(
+            "rack_manager.BatchResetSwitchFactoryDefaultRequest.allow_expired_nvue_server_certificate",
+            "#[cfg_attr(feature = \"serde\", serde(default))]",
+        )
         // prost_types::Timestamp does not implement serde, so each timestamp field
         // needs the crate adapter while the rest of the package can use type_attribute.
         .field_attribute(
