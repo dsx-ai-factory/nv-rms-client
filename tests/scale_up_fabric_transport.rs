@@ -182,7 +182,30 @@ mod client_tests {
             let response = rm::GetScaleUpFabricStatusResponse {
                 status: status.into(),
                 fabric_status: (!observation_present).then(rm::ScaleUpFabricStatus::default),
-                observation: observation_present.then(rm::ScaleUpFabricObservation::default),
+                observation: observation_present.then(|| rm::ScaleUpFabricObservation {
+                    fabrics: vec![rm::ScaleUpFabricInspectionObservation {
+                        switch_node_ids: vec!["switch-1".into()],
+                        compute_node_ids: vec!["compute-1".into(), "compute-2".into()],
+                        primary_switch_node_id: "switch-1".into(),
+                        control_plane_state: rm::ScaleUpFabricControlPlaneState::Configured.into(),
+                        health: rm::ScaleUpFabricHealthState::Unhealthy.into(),
+                        component_health: Some(rm::ScaleUpFabricHealthStatus {
+                            controller: rm::ScaleUpFabricHealthState::Healthy.into(),
+                            compute: rm::ScaleUpFabricHealthState::Unknown.into(),
+                            switches: rm::ScaleUpFabricHealthState::Healthy.into(),
+                            links: rm::ScaleUpFabricHealthState::Unhealthy.into(),
+                        }),
+                        inspection_errors: if status == rm::ReturnCode::Failure {
+                            vec![rm::ScaleUpFabricInspectionError {
+                                node_id: "switch-1".into(),
+                                message: "controller-state: resource read failed".into(),
+                            }]
+                        } else {
+                            vec![]
+                        },
+                    }],
+                    ..Default::default()
+                }),
                 ..Default::default()
             };
 

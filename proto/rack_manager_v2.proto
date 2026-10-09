@@ -70,11 +70,12 @@ message ScaleUpFabricConfig {
   // Topology to be configured for the scale-up fabric (applied to the fabric manager).
   string topology_type = 1;
 
-  // Additional static configuration entries to apply to the fabric manager. This is a
-  // generic pass-through for configuration without a dedicated field above. Each
+  // Additional static configuration entries to apply to the fabric manager. Each
   // (config_file_name, key) pair must be unique; duplicate keys are rejected.
-  // With layout, omitted deployment-managed keys are removed. Other omitted keys
-  // remain unchanged. Without layout, all omitted static settings remain unchanged.
+  // With layout, deployment rules derive managed settings by topology and fabric size.
+  // Matching caller values are accepted; conflicts with managed set or removal targets
+  // are rejected. Omitted unmanaged keys remain unchanged. Without layout, all omitted
+  // static settings remain unchanged.
   repeated rack_manager.ScaleUpFabricStaticConfig extra_static_configs = 2;
 }
 
@@ -100,7 +101,8 @@ message ConfigureScaleUpFabricManagerRequest {
   // Defaults to --default-switch-domain when unset.
   optional string domain = 3;
 
-  // Required desired configuration, applied to each resolved fabric with layout.
+  // Required topology and optional caller settings shared by resolved fabrics.
+  // With layout, managed static values can differ by fabric size.
   ScaleUpFabricConfig config = 4;
 
   // Presence selects layout reconciliation; absence selects single-cluster behavior
