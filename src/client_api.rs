@@ -403,6 +403,21 @@ pub trait RmsApi: Send + Sync + 'static {
         .into())
     }
 
+    /// Reads live fabric members, controller state, and sampled component status.
+    ///
+    /// Collection failures retain successful observations. A normal component
+    /// status does not establish end-to-end connectivity or bandwidth.
+    /// Implementors may omit this method; the default returns `Unimplemented`.
+    async fn inspect_scale_up_fabrics(
+        &self,
+        _cmd: rms::InspectScaleUpFabricsRequest,
+    ) -> Result<rms::InspectScaleUpFabricsResponse, RackManagerError> {
+        Err(
+            tonic::Status::unimplemented("InspectScaleUpFabrics is not implemented by this RmsApi")
+                .into(),
+        )
+    }
+
     async fn batch_reset_switch_sdn_factory_default(
         &self,
         cmd: rms::BatchResetSwitchSdnFactoryDefaultRequest,
@@ -752,6 +767,13 @@ impl RmsApi for RackManagerApi {
         cmd: rms::GetScaleUpFabricStatusRequest,
     ) -> Result<rms::GetScaleUpFabricStatusResponse, RackManagerError> {
         Ok(self.client.get_scale_up_fabric_status(cmd).await?)
+    }
+
+    async fn inspect_scale_up_fabrics(
+        &self,
+        cmd: rms::InspectScaleUpFabricsRequest,
+    ) -> Result<rms::InspectScaleUpFabricsResponse, RackManagerError> {
+        Ok(self.client.inspect_scale_up_fabrics(cmd).await?)
     }
 
     async fn batch_reset_switch_sdn_factory_default(

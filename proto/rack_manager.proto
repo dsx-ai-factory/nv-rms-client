@@ -598,6 +598,16 @@ service RackManager {
   rpc GetScaleUpFabricStatus(GetScaleUpFabricStatusRequest) returns (GetScaleUpFabricStatusResponse) {}
 
   /*
+   * InspectScaleUpFabrics discovers enabled controllers and reports their live
+   * compute and switch members, control-plane state, and sampled component status.
+   * Compute BMCs provide physical identities for correlating observed GPUs with
+   * caller node IDs; compute hosts are not configured or tested.
+   * No devices are changed. Results do not verify a desired configuration,
+   * end-to-end communication, or bandwidth.
+   */
+  rpc InspectScaleUpFabrics(InspectScaleUpFabricsRequest) returns (InspectScaleUpFabricsResponse) {}
+
+  /*
    * BatchResetSwitchSdnFactoryDefault submits asynchronous SDN factory-default resets.
    * All switches in the request use the same domain for switch mTLS material.
    * Returns a parent job ID. Use GetJobStatus with child job states to track per-node progress.
@@ -1319,10 +1329,75 @@ message GetScaleUpFabricStatusResponse {
   string error_message = 3;              // Error details if inspection failed
 }
 
+// Live inspection uses caller-supplied inventory, without desired settings or job history.
+message InspectScaleUpFabricsRequest {
+  // Switch inventory used to discover enabled controllers and physical identities.
+  // Include every switch whose controller or fabric members should be observed.
+  NodeSet nodes = 1;
+
+  // Optional site selector used for switch server verification (TLS).
+  // Defaults to --default-switch-domain when unset.
+  optional string domain = 2;
+
+  // Optional BMC inventory for resolving observed compute trays to caller node IDs.
+  // BMC reads identify chassis and tray positions; they do not configure hosts.
+  // Unresolved observed nodes are reported as collection errors, not omitted silently.
+  NodeSet compute_nodes = 3;
+}
+
+// Collection or interpretation failure, separate from observed component status.
+message ScaleUpFabricInspectionError {
+  // Affected caller node ID; empty for a fabric-wide or request-wide error.
+  string node_id = 1;
+  // Credential-free description identifying the failed operation or ambiguous evidence.
+  string message = 2;
+}
+
+// Live samples collected over an interval, not an atomic rack snapshot.
+message InspectScaleUpFabricsResponse {
+  // SUCCESS means collection completed without read or interpretation errors.
+  // An ABNORMAL fabric status alone does not cause FAILURE.
+  ReturnCode status = 1;
+
+  // One observation per enabled controller, in switch inventory order.
+  // No enabled controllers produces an empty list, not an error.
+  // Successful observations are retained when another read fails.
+  repeated ScaleUpFabricInspectionObservation fabrics = 2;
+
+  // Discovery failures that cannot be associated with a fabric.
+  // Fabric-specific errors appear only in that fabric's inspection_errors.
+  repeated ScaleUpFabricInspectionError discovery_errors = 3;
+
+  // Summary of collection or interpretation failures; empty on SUCCESS.
+  string error_message = 4;
+}
+
+// Observed node associations and component status sampled from one controller.
+// These associations do not confirm that a requested layout was achieved;
+// compare the observed node IDs with the configuration response's selected_fabrics.
+message ScaleUpFabricInspectionObservation {
+  // Caller node IDs resolved from live topology and discovered physical identities.
+  // Lists are sorted and deduplicated; inspection_errors explain unresolved associations.
+  repeated string switch_node_ids = 1;
+  repeated string compute_node_ids = 2;
+  string primary_switch_node_id = 3; // Switch whose enabled controller was inspected.
+
+  // NORMAL requires a configured control plane, NORMAL components, and complete,
+  // unambiguous collection. A failed control plane or ABNORMAL component yields
+  // ABNORMAL; incomplete evidence otherwise yields UNKNOWN. No communication or
+  // bandwidth test is performed.
+  ScaleUpFabricReportedStatus status = 4;
+  ScaleUpFabricControlPlaneState control_plane_state = 5;
+  ScaleUpFabricComponentStatus component_status = 6; // Independent sampled component indicators.
+
+  // Failed reads and interpretation errors, not successfully observed ABNORMAL states.
+  repeated ScaleUpFabricInspectionError inspection_errors = 7;
+}
+
 // ScaleUpFabricStatus reports the observed scale-up fabric configuration as read back
 // from the switches. It is returned directly by GetScaleUpFabricStatus and is also stored,
-// JSON-encoded, in JobStatus.result_json when a rack_manager_v2.RackManagerV2.
-// ConfigureScaleUpFabricManager job completes. Callers can compare desired and observed
+// JSON-encoded, in JobStatus.result_json when a no-layout rack_manager_v2.RackManagerV2.
+// ConfigureScaleUpFabricManager job succeeds. Callers can compare desired and observed
 // configurations to detect drift.
 message ScaleUpFabricStatus {
   // Topology type currently configured for the scale-up fabric.
@@ -1344,6 +1419,39 @@ message ScaleUpFabricSwitchStatus {
   bool enabled = 2;          // Whether the scale-up fabric cluster is enabled on this switch
   string fabric_manager_status = 3; // Raw fabric manager app status reported by the switch; empty when unavailable
   string error_message = 4;  // Set when this switch could not be inspected
+}
+
+// Configuration state reported by NMX-C, not compared with caller intent.
+enum ScaleUpFabricControlPlaneState {
+  SCALE_UP_FABRIC_CONTROL_PLANE_STATE_UNKNOWN = 0; // No configured or failed state was established.
+  SCALE_UP_FABRIC_CONTROL_PLANE_STATE_CONFIGURED = 1; // NMX-C reports CONFIGURED, not a match to requested settings.
+  SCALE_UP_FABRIC_CONTROL_PLANE_STATE_FAILED = 2; // NMX-C reports a control-plane timeout or error.
+}
+
+// Summary of sampled indicators, not a guarantee of end-to-end communication.
+enum ScaleUpFabricReportedStatus {
+  SCALE_UP_FABRIC_REPORTED_STATUS_UNKNOWN = 0; // Observations are absent or inconclusive.
+  SCALE_UP_FABRIC_REPORTED_STATUS_NORMAL = 1; // All applicable sampled indicators are normal.
+  SCALE_UP_FABRIC_REPORTED_STATUS_ABNORMAL = 2; // At least one sampled indicator reports an abnormal state.
+}
+
+// Independently sampled NMX-C indicators for one observed fabric.
+// ABNORMAL takes precedence over UNKNOWN, then NORMAL. Empty evidence is UNKNOWN.
+// Individual raw device and port states are not included.
+message ScaleUpFabricComponentStatus {
+  // Controller indicator from GetDomainStateInfo, independent of configuration state.
+  ScaleUpFabricReportedStatus controller = 1;
+
+  // GPU and compute-node indicators from GetTopologyInfo and GetComputeNodeInfoList;
+  // these describe fabric participation, not host operating-system status.
+  ScaleUpFabricReportedStatus compute = 2;
+
+  // Device and switch-node indicators from GetTopologyInfo and GetSwitchNodeInfoList.
+  ScaleUpFabricReportedStatus switches = 3;
+
+  // Operational port indicators from GetTopologyInfo. Administratively down ports
+  // and ports outside the scale-up data path do not contribute.
+  ScaleUpFabricReportedStatus links = 4;
 }
 
 // BatchResetSwitchSdnFactoryDefaultRequest submits SDN factory-default resets for caller-supplied switches.

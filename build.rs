@@ -14,6 +14,28 @@
 
 use std::path::PathBuf;
 
+// JSON omission policies preserve legacy request and response shapes.
+const FABRIC_SERDE_FIELD_ATTRIBUTES: &[(&str, &[&str])] = &[
+    (
+        r#"#[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "Option::is_none"))]"#,
+        &[
+            "rack_manager.InspectScaleUpFabricsRequest.compute_nodes",
+            "rack_manager.ScaleUpFabricInspectionObservation.component_status",
+            "rack_manager_v2.ConfigureScaleUpFabricManagerRequest.layout",
+            "rack_manager_v2.ConfigureScaleUpFabricManagerRequest.compute_nodes",
+            "rack_manager_v2.ScaleUpFabricSpec.primary_switch_node_id",
+        ],
+    ),
+    (
+        r#"#[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "Vec::is_empty"))]"#,
+        &[
+            "rack_manager_v2.ConfigureScaleUpFabricManagerResponse.selected_fabrics",
+            "rack_manager_v2.ScaleUpFabricMembers.compute_node_ids",
+            "rack_manager_v2.ScaleUpFabricMembers.switch_node_ids",
+        ],
+    ),
+];
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let build_client = std::env::var_os("CARGO_FEATURE_CLIENT").is_some();
     let build_server = std::env::var_os("CARGO_FEATURE_SERVER").is_some();
@@ -23,7 +45,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // so that different builds get a different binary file and concurrent builds don't collide
     let reflection = out_dir.join("rms.bin");
 
-    tonic_prost_build::configure()
+    let mut protobuf = tonic_prost_build::configure();
+
+    for &(attribute, fields) in FABRIC_SERDE_FIELD_ATTRIBUTES {
+        for &field in fields {
+            protobuf = protobuf.field_attribute(field, attribute);
+        }
+    }
+
+    protobuf
         .file_descriptor_set_path(reflection)
         // Leading dot makes this a prefix match in prost-build's PathMap, covering every message
         // and enum whose FQN starts with ".rack_manager" (i.e. the entire package).
