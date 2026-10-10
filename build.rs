@@ -19,10 +19,8 @@ const FABRIC_SERDE_FIELD_ATTRIBUTES: &[(&str, &[&str])] = &[
     (
         r#"#[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "Option::is_none"))]"#,
         &[
-            "rack_manager.GetScaleUpFabricStatusRequest.inspection",
-            "rack_manager.GetScaleUpFabricStatusResponse.observation",
-            "rack_manager.ScaleUpFabricInspection.compute_nodes",
-            "rack_manager.ScaleUpFabricInspectionObservation.component_health",
+            "rack_manager.InspectScaleUpFabricsRequest.compute_nodes",
+            "rack_manager.ScaleUpFabricInspectionObservation.component_status",
             "rack_manager_v2.ConfigureScaleUpFabricManagerRequest.layout",
             "rack_manager_v2.ConfigureScaleUpFabricManagerRequest.compute_nodes",
             "rack_manager_v2.ScaleUpFabricSpec.primary_switch_node_id",
@@ -31,9 +29,9 @@ const FABRIC_SERDE_FIELD_ATTRIBUTES: &[(&str, &[&str])] = &[
     (
         r#"#[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "Vec::is_empty"))]"#,
         &[
-            "rack_manager_v2.ConfigureScaleUpFabricManagerResponse.resolved_fabrics",
-            "rack_manager_v2.ScaleUpFabricAssignment.compute_node_ids",
-            "rack_manager_v2.ScaleUpFabricAssignment.switch_node_ids",
+            "rack_manager_v2.ConfigureScaleUpFabricManagerResponse.selected_fabrics",
+            "rack_manager_v2.ScaleUpFabricMembers.compute_node_ids",
+            "rack_manager_v2.ScaleUpFabricMembers.switch_node_ids",
         ],
     ),
 ];

@@ -28,8 +28,11 @@ mod client_tests {
     #[derive(Default)]
     struct State {
         submissions: Vec<v2::ConfigureScaleUpFabricManagerRequest>,
+        inspections: Vec<rm::InspectScaleUpFabricsRequest>,
         delay: Duration,
         status_response: rm::GetScaleUpFabricStatusResponse,
+        inspection_response: rm::InspectScaleUpFabricsResponse,
+        inspection_error: Option<tonic::Status>,
         configure_response: v2::ConfigureScaleUpFabricManagerResponse,
     }
 
@@ -95,6 +98,40 @@ mod client_tests {
         }
     }
 
+    struct InspectionRpc(Arc<Mutex<State>>);
+
+    impl tonic::server::UnaryService<rm::InspectScaleUpFabricsRequest> for InspectionRpc {
+        type Response = rm::InspectScaleUpFabricsResponse;
+        type Future = RpcFuture<Self::Response>;
+
+        fn call(
+            &mut self,
+            request: tonic::Request<rm::InspectScaleUpFabricsRequest>,
+        ) -> Self::Future {
+            let (delay, response, error) = {
+                let mut state = self.0.lock().unwrap();
+
+                state.inspections.push(request.into_inner());
+
+                (
+                    state.delay,
+                    state.inspection_response.clone(),
+                    state.inspection_error.clone(),
+                )
+            };
+
+            Box::pin(async move {
+                tokio::time::sleep(delay).await;
+
+                if let Some(error) = error {
+                    return Err(error);
+                }
+
+                Ok(tonic::Response::new(response))
+            })
+        }
+    }
+
     struct Fixture {
         url: String,
         state: Arc<Mutex<State>>,
@@ -135,6 +172,10 @@ mod client_tests {
                                                 tonic::server::Grpc::new(tonic_prost::ProstCodec::default())
                                                     .unary(StatusRpc(state), request).await
                                             }
+                                            "/rack_manager.RackManager/InspectScaleUpFabrics" => {
+                                                tonic::server::Grpc::new(tonic_prost::ProstCodec::default())
+                                                    .unary(InspectionRpc(state), request).await
+                                            }
                                             path => panic!("unexpected RPC: {path}"),
                                         };
 
@@ -168,43 +209,15 @@ mod client_tests {
     }
 
     #[tokio::test]
-    async fn client_requires_observation_only_for_inspection_including_failed_responses() {
-        for (inspection_requested, observation_present, status) in [
-            (false, false, rm::ReturnCode::Success),
-            (false, false, rm::ReturnCode::Failure),
-            (false, true, rm::ReturnCode::Success),
-            (false, true, rm::ReturnCode::Failure),
-            (true, false, rm::ReturnCode::Success),
-            (true, false, rm::ReturnCode::Failure),
-            (true, true, rm::ReturnCode::Success),
-            (true, true, rm::ReturnCode::Failure),
-        ] {
+    async fn stored_configuration_responses_pass_through_without_inspection() {
+        for status in [rm::ReturnCode::Success, rm::ReturnCode::Failure] {
             let response = rm::GetScaleUpFabricStatusResponse {
                 status: status.into(),
-                fabric_status: (!observation_present).then(rm::ScaleUpFabricStatus::default),
-                observation: observation_present.then(|| rm::ScaleUpFabricObservation {
-                    fabrics: vec![rm::ScaleUpFabricInspectionObservation {
-                        switch_node_ids: vec!["switch-1".into()],
-                        compute_node_ids: vec!["compute-1".into(), "compute-2".into()],
-                        primary_switch_node_id: "switch-1".into(),
-                        control_plane_state: rm::ScaleUpFabricControlPlaneState::Configured.into(),
-                        health: rm::ScaleUpFabricHealthState::Unhealthy.into(),
-                        component_health: Some(rm::ScaleUpFabricHealthStatus {
-                            controller: rm::ScaleUpFabricHealthState::Healthy.into(),
-                            compute: rm::ScaleUpFabricHealthState::Unknown.into(),
-                            switches: rm::ScaleUpFabricHealthState::Healthy.into(),
-                            links: rm::ScaleUpFabricHealthState::Unhealthy.into(),
-                        }),
-                        inspection_errors: if status == rm::ReturnCode::Failure {
-                            vec![rm::ScaleUpFabricInspectionError {
-                                node_id: "switch-1".into(),
-                                message: "controller-state: resource read failed".into(),
-                            }]
-                        } else {
-                            vec![]
-                        },
-                    }],
-                    ..Default::default()
+                fabric_status: (status == rm::ReturnCode::Success).then(|| {
+                    rm::ScaleUpFabricStatus {
+                        topology_type: "fixture-topology".into(),
+                        ..Default::default()
+                    }
                 }),
                 ..Default::default()
             };
@@ -217,38 +230,128 @@ mod client_tests {
 
             let client = fixture.client(&RmsClientConfig::new(None, None, None, false));
 
-            let request = rm::GetScaleUpFabricStatusRequest {
-                inspection: inspection_requested.then(rm::ScaleUpFabricInspection::default),
-                ..Default::default()
-            };
-
             let result = tokio::time::timeout(
                 Duration::from_secs(5),
-                client.get_scale_up_fabric_status(request),
+                client.get_scale_up_fabric_status(rm::GetScaleUpFabricStatusRequest::default()),
             )
             .await
             .expect("status RPC should finish before the timeout");
 
-            if inspection_requested && !observation_present {
-                let Err(RackManagerError::ApiInvocationError(error)) = result else {
-                    panic!("inspection response without observation must be unsupported");
-                };
-
-                assert_eq!(error.code(), tonic::Code::Unimplemented);
-
-                assert!(
-                    error
-                        .message()
-                        .contains("omitted the requested live observation")
-                );
-            } else {
-                assert_eq!(result.unwrap(), response);
-            }
+            assert_eq!(result.unwrap(), response);
         }
     }
 
     #[tokio::test]
-    async fn configuration_requests_forward_inventory_layouts_and_return_assignments() {
+    async fn inspection_forwards_inventory_and_retains_partial_results() {
+        for (with_computes, status) in [
+            (false, rm::ReturnCode::Success),
+            (true, rm::ReturnCode::Success),
+            (true, rm::ReturnCode::Failure),
+        ] {
+            let response = rm::InspectScaleUpFabricsResponse {
+                status: status.into(),
+                fabrics: vec![rm::ScaleUpFabricInspectionObservation {
+                    switch_node_ids: vec!["switch-1".into()],
+                    compute_node_ids: vec!["compute-1".into(), "compute-2".into()],
+                    primary_switch_node_id: "switch-1".into(),
+                    control_plane_state: rm::ScaleUpFabricControlPlaneState::Configured.into(),
+                    status: rm::ScaleUpFabricReportedStatus::Abnormal.into(),
+                    component_status: Some(rm::ScaleUpFabricComponentStatus {
+                        controller: rm::ScaleUpFabricReportedStatus::Normal.into(),
+                        compute: rm::ScaleUpFabricReportedStatus::Unknown.into(),
+                        switches: rm::ScaleUpFabricReportedStatus::Normal.into(),
+                        links: rm::ScaleUpFabricReportedStatus::Abnormal.into(),
+                    }),
+                    inspection_errors: if status == rm::ReturnCode::Failure {
+                        vec![rm::ScaleUpFabricInspectionError {
+                            node_id: "switch-1".into(),
+                            message: "compute-nodes: resource read failed".into(),
+                        }]
+                    } else {
+                        vec![]
+                    },
+                }],
+                discovery_errors: if status == rm::ReturnCode::Failure {
+                    vec![rm::ScaleUpFabricInspectionError {
+                        node_id: "switch-2".into(),
+                        message: "cluster: resource read failed".into(),
+                    }]
+                } else {
+                    vec![]
+                },
+                error_message: if status == rm::ReturnCode::Failure {
+                    "one or more observations are incomplete or ambiguous".into()
+                } else {
+                    String::new()
+                },
+            };
+
+            let fixture = Fixture::new(State {
+                inspection_response: response.clone(),
+                ..Default::default()
+            })
+            .await;
+
+            let client = fixture.client(&RmsClientConfig::new(None, None, None, false));
+
+            let request = rm::InspectScaleUpFabricsRequest {
+                nodes: Some(rm::NodeSet {
+                    nodes: vec![rm::NodeInfo {
+                        node_id: "switch-1".into(),
+                        ..Default::default()
+                    }],
+                }),
+                domain: Some("fixture.example".into()),
+                compute_nodes: with_computes.then(|| rm::NodeSet {
+                    nodes: vec![rm::NodeInfo {
+                        node_id: "compute-1".into(),
+                        ..Default::default()
+                    }],
+                }),
+            };
+
+            let actual = tokio::time::timeout(
+                Duration::from_secs(5),
+                client.inspect_scale_up_fabrics(request.clone()),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+
+            assert_eq!(actual, response);
+            assert_eq!(fixture.state.lock().unwrap().inspections, vec![request]);
+        }
+    }
+
+    #[tokio::test]
+    async fn inspection_preserves_unimplemented_from_unsupported_servers() {
+        let fixture = Fixture::new(State {
+            inspection_error: Some(tonic::Status::unimplemented(
+                "inspection RPC is unavailable",
+            )),
+            ..Default::default()
+        })
+        .await;
+
+        let client = fixture.client(&RmsClientConfig::new(None, None, None, false));
+
+        let result = tokio::time::timeout(
+            Duration::from_secs(5),
+            client.inspect_scale_up_fabrics(rm::InspectScaleUpFabricsRequest::default()),
+        )
+        .await
+        .unwrap();
+
+        let Err(RackManagerError::ApiInvocationError(error)) = result else {
+            panic!("unsupported inspection must return an invocation error");
+        };
+
+        assert_eq!(error.code(), tonic::Code::Unimplemented);
+        assert_eq!(error.message(), "inspection RPC is unavailable");
+    }
+
+    #[tokio::test]
+    async fn configuration_requests_forward_inventory_layouts_and_return_selected_fabrics() {
         let nodes = rm::NodeSet {
             nodes: ["switch-1", "switch-2"]
                 .into_iter()
@@ -288,7 +391,7 @@ mod client_tests {
             }],
         };
 
-        let full_assignment = v2::ScaleUpFabricAssignment {
+        let full_assignment = v2::ScaleUpFabricMembers {
             compute_node_ids: compute_nodes
                 .nodes
                 .iter()
@@ -305,12 +408,12 @@ mod client_tests {
                 Some(partial_layout),
                 true,
                 vec![
-                    v2::ScaleUpFabricAssignment {
+                    v2::ScaleUpFabricMembers {
                         compute_node_ids: vec!["compute-3".to_owned(), "compute-4".to_owned()],
                         switch_node_ids: vec!["switch-2".to_owned()],
                         primary_switch_node_id: "switch-2".to_owned(),
                     },
-                    v2::ScaleUpFabricAssignment {
+                    v2::ScaleUpFabricMembers {
                         compute_node_ids: vec!["compute-1".to_owned(), "compute-2".to_owned()],
                         switch_node_ids: vec!["switch-1".to_owned()],
                         primary_switch_node_id: "switch-1".to_owned(),
@@ -327,7 +430,7 @@ mod client_tests {
                 "full_without_computes",
                 Some(full_layout),
                 false,
-                vec![v2::ScaleUpFabricAssignment {
+                vec![v2::ScaleUpFabricMembers {
                     compute_node_ids: vec![],
                     ..full_assignment
                 }],
@@ -351,7 +454,7 @@ mod client_tests {
 
             let expected_response = v2::ConfigureScaleUpFabricManagerResponse {
                 job_id: format!("accepted-{name}"),
-                resolved_fabrics: assignments,
+                selected_fabrics: assignments,
             };
 
             let fixture = Fixture::new(State {

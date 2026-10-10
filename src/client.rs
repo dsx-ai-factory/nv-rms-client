@@ -307,7 +307,6 @@ impl<'a> RmsTlsClient<'a> {
                 .enable_http2()
                 .build(),
         );
-
         https_connector.set_connect_timeout(self.rms_client_config.connect_timeout);
         https_connector.set_read_timeout(self.rms_client_config.connect_timeout);
         https_connector.set_write_timeout(self.rms_client_config.connect_timeout);
