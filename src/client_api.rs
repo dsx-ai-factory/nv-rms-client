@@ -354,8 +354,8 @@ pub trait RmsApi: Send + Sync + 'static {
 
     /// Submits asynchronous NVOS factory-default resets for the given switches.
     ///
-    /// Set `cmd.allow_expired_nvue_server_certificate` to allow HTTPS fallback with
-    /// expiry-only certificate validation when the NVUE server certificate has expired.
+    /// Set `cmd.allow_ssh_fallback` to permit reset submission over SSH when the
+    /// reset cannot be submitted through NVUE.
     /// The fallback is disabled by default.
     ///
     /// Implementors may omit this method; the default returns `Unimplemented`.

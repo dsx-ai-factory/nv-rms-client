@@ -68,9 +68,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "rack_manager.NodeInfo.additional_host_endpoints",
             "#[cfg_attr(feature = \"serde\", serde(default, skip_serializing_if = \"Vec::is_empty\"))]",
         )
-        // Older serialized requests keep certificate fallback disabled when the field is absent.
+        // Serialized requests keep SSH fallback disabled when the field is absent.
         .field_attribute(
-            "rack_manager.BatchResetSwitchFactoryDefaultRequest.allow_expired_nvue_server_certificate",
+            "rack_manager.BatchResetSwitchFactoryDefaultRequest.allow_ssh_fallback",
             "#[cfg_attr(feature = \"serde\", serde(default))]",
         )
         // prost_types::Timestamp does not implement serde, so each timestamp field

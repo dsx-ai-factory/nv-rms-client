@@ -81,9 +81,9 @@ mod proto_model_tests {
 
     use super::protos::rack_manager::{
         ApplyStoredSwitchSystemImageRequest, ApplySwitchSystemImageRequest,
-        BatchGetFirmwareInventoryRequest, CompareFirmwareObjectRequest, Endpoint,
-        FirmwareComparisonStatus, NetworkInterface, NodeInfo, NodeSet, NodeType,
-        UpdateSwitchSystemImageRequest,
+        BatchGetFirmwareInventoryRequest, BatchResetSwitchFactoryDefaultRequest,
+        CompareFirmwareObjectRequest, Endpoint, FirmwareComparisonStatus, NetworkInterface,
+        NodeInfo, NodeSet, NodeType, UpdateSwitchSystemImageRequest,
     };
 
     #[test]
@@ -206,6 +206,16 @@ mod proto_model_tests {
                 .unwrap()
                 .allow_onie_recovery
         );
+    }
+
+    #[test]
+    fn factory_reset_ssh_fallback_defaults_to_disabled() -> Result<(), prost::DecodeError> {
+        let request = BatchResetSwitchFactoryDefaultRequest::decode([].as_slice())?;
+
+        assert!(!request.allow_ssh_fallback);
+        assert!(request.encode_to_vec().is_empty());
+
+        Ok(())
     }
 
     #[test]
