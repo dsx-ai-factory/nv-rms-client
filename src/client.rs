@@ -19,7 +19,6 @@ use std::time::Duration;
 use eyre::Result;
 use hyper::body::Incoming;
 use hyper_timeout::TimeoutConnector;
-use hyper_util::client::legacy::connect::HttpConnector;
 use hyper_util::rt::{TokioExecutor, TokioTimer};
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
 use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
@@ -230,11 +229,6 @@ impl<'a> RmsTlsClient<'a> {
         &self,
         url: S,
     ) -> RmsTlsClientResult<(TransportService, Uri)> {
-        let mut http_connector = TimeoutConnector::new(HttpConnector::new());
-        http_connector.set_connect_timeout(self.rms_client_config.connect_timeout);
-        http_connector.set_read_timeout(self.rms_client_config.connect_timeout);
-        http_connector.set_write_timeout(self.rms_client_config.connect_timeout);
-
         let uri = Uri::from_str(url.as_ref()).map_err(|e| ConfigurationError::InvalidUri {
             uri_string: url.as_ref().to_string(),
             error: e,
@@ -315,9 +309,8 @@ impl<'a> RmsTlsClient<'a> {
                 .enable_http2()
                 .build(),
         );
+
         https_connector.set_connect_timeout(self.rms_client_config.connect_timeout);
-        https_connector.set_read_timeout(self.rms_client_config.connect_timeout);
-        https_connector.set_write_timeout(self.rms_client_config.connect_timeout);
 
         let hyper_client = hyper_util::client::legacy::Client::builder(TokioExecutor::new())
             .http2_only(true)
@@ -371,10 +364,9 @@ impl<'a> RmsTlsClient<'a> {
         Ok(client_v2)
     }
 
-    /// retry_build creates a new RmsTlsClient from
-    /// the given RMS API URL and RmsClientConfig, then attempts to build
-    /// and return a client, integrating retries into the
-    /// building attempts.
+    /// Builds a client and retries failed `GetVersion` readiness probes.
+    /// Each probe uses `client_config.connect_timeout`, including connection establishment.
+    /// `None` leaves probes without a deadline.
     pub async fn retry_build_rms(
         api_config: &RmsApiConfig<'a>,
     ) -> RmsTlsClientResult<RackManagerClientT> {
@@ -391,12 +383,24 @@ impl<'a> RmsTlsClient<'a> {
                     Err(e) => return Ok(Err(e)),
                 };
 
-                // The thing we actually want to retry is a test connection
-                client
-                    .get_version(tonic::Request::new(
-                        crate::protos::rack_manager::GetVersionRequest {},
-                    ))
-                    .await
+                let probe = client.get_version(tonic::Request::new(
+                    crate::protos::rack_manager::GetVersionRequest {},
+                ));
+
+                let readiness = match api_config.client_config.connect_timeout {
+                    Some(timeout) => {
+                        tokio::time::timeout(timeout, probe)
+                            .await
+                            .unwrap_or_else(|_| {
+                                Err(tonic::Status::deadline_exceeded(
+                                    "RMS readiness probe timed out",
+                                ))
+                            })
+                    }
+                    None => probe.await,
+                };
+
+                readiness
                     .inspect_err(|err| {
                         tracing::error!(
                             "error connecting client to rms (url: {}), will retry: {}",
