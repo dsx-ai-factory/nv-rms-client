@@ -323,6 +323,7 @@ impl<'a> RmsTlsClient<'a> {
             // How many connections will be kept open, per host.
             .pool_max_idle_per_host(2)
             .timer(TokioTimer::new())
+            .pool_timer(TokioTimer::new())
             .build(https_connector)
             .boxed_clone();
 

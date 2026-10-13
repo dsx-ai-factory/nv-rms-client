@@ -486,12 +486,12 @@ async fn observer_errors_never_affect_the_rpc() {
 }
 
 #[tokio::test]
-async fn idle_connection_does_not_shorten_the_next_rpc() {
+async fn idle_connection_preserves_rpc_timeout_and_is_evicted() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url = format!("http://{}", listener.local_addr().unwrap());
 
     // Accept one connection so both RPCs must reuse the same socket.
-    let server = tokio::spawn(async move {
+    let mut server = tokio::spawn(async move {
         let (socket, _) = listener.accept().await.unwrap();
 
         let service = hyper::service::service_fn(|request: hyper::Request<Incoming>| async move {
@@ -521,9 +521,31 @@ async fn idle_connection_does_not_shorten_the_next_rpc() {
     )
     .await;
 
+    assert!(response.unwrap().is_ok());
+
+    // Verify retention before the pool's 90-second expiry, then cleanup after it.
+    tokio::time::pause();
+    tokio::time::advance(Duration::from_secs(88)).await;
+    tokio::time::resume();
+
+    assert!(
+        tokio::time::timeout(Duration::from_millis(20), &mut server)
+            .await
+            .is_err(),
+        "idle connection must remain open before the pool timeout"
+    );
+
+    tokio::time::pause();
+    tokio::time::advance(Duration::from_secs(3)).await;
+    tokio::time::resume();
+
+    let closed = tokio::time::timeout(Duration::from_secs(2), &mut server).await;
+
     server.abort();
 
-    assert!(response.unwrap().is_ok());
+    closed
+        .expect("unused connection must be evicted without another RPC")
+        .unwrap();
 }
 
 #[tokio::test]
