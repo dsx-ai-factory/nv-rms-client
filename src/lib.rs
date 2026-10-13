@@ -296,6 +296,15 @@ mod server_feature_tests {
 mod tests {
     use super::protos::{rack_manager as rms, rack_manager_v2 as rms_v2};
 
+    #[test]
+    fn factory_reset_ssh_fallback_defaults_to_disabled_in_json() -> Result<(), serde_json::Error> {
+        let request: rms::BatchResetSwitchFactoryDefaultRequest = serde_json::from_str("{}")?;
+
+        assert!(!request.allow_ssh_fallback);
+
+        Ok(())
+    }
+
     /// Compile-time trait bound check. The function body is empty and optimized away;
     /// the compiler just verifies T satisfies Serialize + DeserializeOwned. If the
     /// type_attribute in build.rs stops covering a type, the call site fails to compile.
