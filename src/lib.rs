@@ -81,9 +81,9 @@ mod proto_model_tests {
 
     use super::protos::rack_manager::{
         ApplyStoredSwitchSystemImageRequest, ApplySwitchSystemImageRequest,
-        BatchGetFirmwareInventoryRequest, CompareFirmwareObjectRequest, Endpoint,
-        FirmwareComparisonStatus, NetworkInterface, NodeInfo, NodeSet, NodeType,
-        UpdateSwitchSystemImageRequest,
+        BatchGetFirmwareInventoryRequest, BatchResetSwitchFactoryDefaultRequest,
+        CompareFirmwareObjectRequest, Endpoint, FirmwareComparisonStatus, NetworkInterface,
+        NodeInfo, NodeSet, NodeType, UpdateSwitchSystemImageRequest,
     };
 
     #[test]
@@ -209,6 +209,16 @@ mod proto_model_tests {
     }
 
     #[test]
+    fn factory_reset_ssh_fallback_defaults_to_disabled() -> Result<(), prost::DecodeError> {
+        let request = BatchResetSwitchFactoryDefaultRequest::decode([].as_slice())?;
+
+        assert!(!request.allow_ssh_fallback);
+        assert!(request.encode_to_vec().is_empty());
+
+        Ok(())
+    }
+
+    #[test]
     fn firmware_manifest_comparison_api_has_stable_wire_values() {
         assert_eq!(FirmwareComparisonStatus::Matched as i32, 1);
         assert_eq!(FirmwareComparisonStatus::Mismatched as i32, 2);
@@ -285,6 +295,15 @@ mod server_feature_tests {
 #[cfg(all(test, feature = "serde"))]
 mod tests {
     use super::protos::{rack_manager as rms, rack_manager_v2 as rms_v2};
+
+    #[test]
+    fn factory_reset_ssh_fallback_defaults_to_disabled_in_json() -> Result<(), serde_json::Error> {
+        let request: rms::BatchResetSwitchFactoryDefaultRequest = serde_json::from_str("{}")?;
+
+        assert!(!request.allow_ssh_fallback);
+
+        Ok(())
+    }
 
     /// Compile-time trait bound check. The function body is empty and optimized away;
     /// the compiler just verifies T satisfies Serialize + DeserializeOwned. If the
