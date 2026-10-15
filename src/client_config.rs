@@ -46,7 +46,12 @@ pub struct RmsClientConfig {
     pub client_cert: Option<ClientCert>,
     pub enforce_tls: bool,
     pub max_decoding_message_size: Option<usize>,
+
+    /// Bounds connection establishment, including TLS, and each `GetVersion` readiness
+    /// attempt. Does not limit socket reads, writes, or application RPC execution.
+    /// `None` disables both limits. `new` uses ten seconds; `Default` uses `None`.
     pub connect_timeout: Option<Duration>,
+
     pub connect_retries_max: Option<u32>,
     pub connect_retries_interval: Option<Duration>,
 }
