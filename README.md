@@ -8,6 +8,14 @@ and server support for the NVIDIA Rack Management Service (RMS).
 The NVIDIA Rack Management Service provides functionality for managing NVIDIA
 multi-node NVLINK rack-scale hardware.
 
+## Device information
+
+Use `BatchGetNodeDeviceInfo` to query device location metadata for caller-supplied
+nodes. Each request supplies the hardware identity, endpoints, and credentials;
+RMS does not register the supplied nodes. Registered-inventory RPCs
+(`CreateNodes`, `UpdateNode`, `DeleteNode`, `ListRacks`, `ListNodeInventory`,
+`GetNodeDeviceInfo`, and `ListNodeDeviceInfoByNodeType`) are no longer exposed.
+
 ## Features
 
 - `client`: generated client APIs plus the TLS, retry, and transport stack.

@@ -87,6 +87,55 @@ mod proto_model_tests {
     };
 
     #[test]
+    fn inventory_service_retains_only_stateless_device_info() -> Result<(), prost::DecodeError> {
+        let descriptors = prost_types::FileDescriptorSet::decode(super::FILE_DESCRIPTOR_SET)?;
+
+        let service = descriptors
+            .file
+            .iter()
+            .filter(|file| file.package.as_deref() == Some("rack_manager"))
+            .flat_map(|file| &file.service)
+            .find(|service| service.name.as_deref() == Some("RackManager"))
+            .expect("RackManager service descriptor must be present");
+
+        for removed in [
+            "ListNodeInventory",
+            "CreateNodes",
+            "UpdateNode",
+            "DeleteNode",
+            "ListRacks",
+            "GetNodeDeviceInfo",
+            "ListNodeDeviceInfoByNodeType",
+        ] {
+            assert!(
+                service
+                    .method
+                    .iter()
+                    .all(|method| method.name.as_deref() != Some(removed)),
+                "removed inventory RPC {removed} must not be exposed"
+            );
+        }
+
+        let batch = service
+            .method
+            .iter()
+            .find(|method| method.name.as_deref() == Some("BatchGetNodeDeviceInfo"))
+            .expect("stateless device-info RPC must remain available");
+
+        assert_eq!(
+            batch.input_type.as_deref(),
+            Some(".rack_manager.BatchGetNodeDeviceInfoRequest")
+        );
+
+        assert_eq!(
+            batch.output_type.as_deref(),
+            Some(".rack_manager.BatchGetNodeDeviceInfoResponse")
+        );
+
+        Ok(())
+    }
+
+    #[test]
     fn vrnvl72_node_types_have_stable_wire_values_and_names() {
         assert_eq!(NodeType::ComputeVrnvl72Nvidia as i32, 10);
         assert_eq!(NodeType::SwitchVrnvl72Nvidia as i32, 11);

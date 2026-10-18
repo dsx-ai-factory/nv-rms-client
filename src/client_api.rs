@@ -217,36 +217,6 @@ pub trait RmsApi: Send + Sync + 'static {
         cmd: rms::BatchGetPowerStateRequest,
     ) -> Result<rms::BatchGetPowerStateResponse, RackManagerError>;
 
-    async fn list_node_inventory(&self)
-    -> Result<rms::ListNodeInventoryResponse, RackManagerError>;
-
-    async fn create_nodes(
-        &self,
-        cmd: rms::CreateNodesRequest,
-    ) -> Result<rms::CreateNodesResponse, RackManagerError>;
-
-    async fn update_node(
-        &self,
-        cmd: rms::UpdateNodeRequest,
-    ) -> Result<rms::UpdateNodeResponse, RackManagerError>;
-
-    async fn delete_node(
-        &self,
-        cmd: rms::DeleteNodeRequest,
-    ) -> Result<rms::DeleteNodeResponse, RackManagerError>;
-
-    async fn list_racks(&self) -> Result<rms::ListRacksResponse, RackManagerError>;
-
-    async fn get_node_device_info(
-        &self,
-        cmd: rms::GetNodeDeviceInfoRequest,
-    ) -> Result<rms::GetNodeDeviceInfoResponse, RackManagerError>;
-
-    async fn list_node_device_info_by_node_type(
-        &self,
-        cmd: rms::ListNodeDeviceInfoByNodeTypeRequest,
-    ) -> Result<rms::ListNodeDeviceInfoByNodeTypeResponse, RackManagerError>;
-
     async fn batch_get_node_device_info(
         &self,
         cmd: rms::BatchGetNodeDeviceInfoRequest,
@@ -528,51 +498,6 @@ impl RmsApi for RackManagerApi {
         cmd: rms::BatchGetPowerStateRequest,
     ) -> Result<rms::BatchGetPowerStateResponse, RackManagerError> {
         Ok(self.client.batch_get_power_state(cmd).await?)
-    }
-
-    async fn list_node_inventory(
-        &self,
-    ) -> Result<rms::ListNodeInventoryResponse, RackManagerError> {
-        Ok(self.client.list_node_inventory().await?)
-    }
-
-    async fn create_nodes(
-        &self,
-        cmd: rms::CreateNodesRequest,
-    ) -> Result<rms::CreateNodesResponse, RackManagerError> {
-        Ok(self.client.create_nodes(cmd).await?)
-    }
-
-    async fn update_node(
-        &self,
-        cmd: rms::UpdateNodeRequest,
-    ) -> Result<rms::UpdateNodeResponse, RackManagerError> {
-        Ok(self.client.update_node(cmd).await?)
-    }
-
-    async fn delete_node(
-        &self,
-        cmd: rms::DeleteNodeRequest,
-    ) -> Result<rms::DeleteNodeResponse, RackManagerError> {
-        Ok(self.client.delete_node(cmd).await?)
-    }
-
-    async fn list_racks(&self) -> Result<rms::ListRacksResponse, RackManagerError> {
-        Ok(self.client.list_racks().await?)
-    }
-
-    async fn get_node_device_info(
-        &self,
-        cmd: rms::GetNodeDeviceInfoRequest,
-    ) -> Result<rms::GetNodeDeviceInfoResponse, RackManagerError> {
-        Ok(self.client.get_node_device_info(cmd).await?)
-    }
-
-    async fn list_node_device_info_by_node_type(
-        &self,
-        cmd: rms::ListNodeDeviceInfoByNodeTypeRequest,
-    ) -> Result<rms::ListNodeDeviceInfoByNodeTypeResponse, RackManagerError> {
-        Ok(self.client.list_node_device_info_by_node_type(cmd).await?)
     }
 
     async fn batch_get_node_device_info(

@@ -379,48 +379,6 @@ service RackManager {
    */
   rpc ExecuteColdReboot(ExecuteColdRebootRequest) returns (ExecuteColdRebootResponse) {}
 
-  /*---------------------------------------------------------------------------
-   * Inventory Control RPCs
-   *-------------------------------------------------------------------------*/
-
-  /*
-   * ListNodeInventory retrieves the complete inventory of all nodes across all racks.
-   */
-  rpc ListNodeInventory(ListNodeInventoryRequest) returns (ListNodeInventoryResponse) {}
-
-  /*
-   * CreateNodes registers one or more new nodes in the inventory.
-   * Supports batch addition of multiple nodes in a single request.
-   */
-  rpc CreateNodes(CreateNodesRequest) returns (CreateNodesResponse) {}
-
-  /*
-   * UpdateNode modifies the configuration of an existing node.
-   * Only specified fields in the update_info will be changed.
-   */
-  rpc UpdateNode(UpdateNodeRequest) returns (UpdateNodeResponse) {}
-
-  /*
-   * DeleteNode removes a node from the inventory. The node must exist in the specified rack.
-   */
-  rpc DeleteNode(DeleteNodeRequest) returns (DeleteNodeResponse) {}
-
-  /*
-   * ListRacks returns a list of all rack IDs in the system.
-   */
-  rpc ListRacks(ListRacksRequest) returns (ListRacksResponse) {}
-
-  /*
-   * GetNodeDeviceInfo retrieves normalized device metadata for a specific node.
-   */
-  rpc GetNodeDeviceInfo(GetNodeDeviceInfoRequest) returns (GetNodeDeviceInfoResponse) {}
-
-  /*
-   * ListNodeDeviceInfoByNodeType retrieves normalized device metadata for all
-   * nodes of a specific type in a rack.
-   */
-  rpc ListNodeDeviceInfoByNodeType(ListNodeDeviceInfoByNodeTypeRequest) returns (ListNodeDeviceInfoByNodeTypeResponse) {}
-
   /*
    * BatchGetNodeDeviceInfo retrieves normalized device metadata for a caller-
    * supplied list of nodes. Each node is identified by its NodeInfo.
