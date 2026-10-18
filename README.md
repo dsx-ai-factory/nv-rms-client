@@ -16,6 +16,26 @@ RMS does not register the supplied nodes. Registered-inventory RPCs
 (`CreateNodes`, `UpdateNode`, `DeleteNode`, `ListRacks`, `ListNodeInventory`,
 `GetNodeDeviceInfo`, and `ListNodeDeviceInfoByNodeType`) are no longer exposed.
 
+## Power and firmware RPC migration
+
+Use the following batch APIs for power control, firmware inventory, and node
+firmware updates with caller-supplied nodes, including a single target:
+
+| Removed RPC | Replacement |
+| --- | --- |
+| `SetPowerState` | `BatchSetPowerState` |
+| `GetPowerState` | `BatchGetPowerState` |
+| `GetNodeFirmwareInventory` | `BatchGetFirmwareInventory` |
+| `GetRackFirmwareInventory` | `BatchGetFirmwareInventory` |
+| `UpdateFirmware` | `BatchUpdateFirmware` |
+| `BatchUpdateFirmwareByNodeType` | `BatchUpdateFirmware` |
+
+Supply each node's identity, endpoints, and credentials in `NodeInfo`. For rack
+inventory queries or updates by node type, the caller supplies the complete
+selected node list. Firmware updates also need targets keyed by node type or
+hardware descriptor. Existing request and response message types remain
+available; the removed RPCs are absent from the service and `RmsApi` trait.
+
 ## Features
 
 - `client`: generated client APIs plus the TLS, retry, and transport stack.

@@ -197,20 +197,10 @@ impl RackManagerApi {
 #[allow(clippy::too_many_arguments, dead_code)]
 #[async_trait::async_trait]
 pub trait RmsApi: Send + Sync + 'static {
-    async fn set_power_state(
-        &self,
-        cmd: rms::SetPowerStateRequest,
-    ) -> Result<rms::SetPowerStateResponse, RackManagerError>;
-
     async fn batch_set_power_state(
         &self,
         cmd: rms::BatchSetPowerStateRequest,
     ) -> Result<rms::BatchSetPowerStateResponse, RackManagerError>;
-
-    async fn get_power_state(
-        &self,
-        cmd: rms::GetPowerStateRequest,
-    ) -> Result<rms::GetPowerStateResponse, RackManagerError>;
 
     async fn batch_get_power_state(
         &self,
@@ -222,11 +212,6 @@ pub trait RmsApi: Send + Sync + 'static {
         cmd: rms::BatchGetNodeDeviceInfoRequest,
     ) -> Result<rms::BatchGetNodeDeviceInfoResponse, RackManagerError>;
 
-    async fn get_node_firmware_inventory(
-        &self,
-        cmd: rms::GetNodeFirmwareInventoryRequest,
-    ) -> Result<rms::GetNodeFirmwareInventoryResponse, RackManagerError>;
-
     async fn batch_get_firmware_inventory(
         &self,
         cmd: rms::BatchGetFirmwareInventoryRequest,
@@ -236,21 +221,6 @@ pub trait RmsApi: Send + Sync + 'static {
         &self,
         cmd: rms::CompareFirmwareObjectRequest,
     ) -> Result<rms::CompareFirmwareObjectResponse, RackManagerError>;
-
-    async fn get_rack_firmware_inventory(
-        &self,
-        cmd: rms::GetRackFirmwareInventoryRequest,
-    ) -> Result<rms::GetRackFirmwareInventoryResponse, RackManagerError>;
-
-    async fn update_firmware(
-        &self,
-        cmd: rms::UpdateFirmwareRequest,
-    ) -> Result<rms::UpdateFirmwareResponse, RackManagerError>;
-
-    async fn batch_update_firmware_by_node_type(
-        &self,
-        cmd: rms::BatchUpdateFirmwareByNodeTypeRequest,
-    ) -> Result<rms::BatchUpdateFirmwareByNodeTypeResponse, RackManagerError>;
 
     async fn batch_update_firmware(
         &self,
@@ -472,25 +442,11 @@ pub trait RmsApi: Send + Sync + 'static {
 
 #[async_trait::async_trait]
 impl RmsApi for RackManagerApi {
-    async fn set_power_state(
-        &self,
-        cmd: rms::SetPowerStateRequest,
-    ) -> Result<rms::SetPowerStateResponse, RackManagerError> {
-        Ok(self.client.set_power_state(cmd).await?)
-    }
-
     async fn batch_set_power_state(
         &self,
         cmd: rms::BatchSetPowerStateRequest,
     ) -> Result<rms::BatchSetPowerStateResponse, RackManagerError> {
         Ok(self.client.batch_set_power_state(cmd).await?)
-    }
-
-    async fn get_power_state(
-        &self,
-        cmd: rms::GetPowerStateRequest,
-    ) -> Result<rms::GetPowerStateResponse, RackManagerError> {
-        Ok(self.client.get_power_state(cmd).await?)
     }
 
     async fn batch_get_power_state(
@@ -507,13 +463,6 @@ impl RmsApi for RackManagerApi {
         Ok(self.client.batch_get_node_device_info(cmd).await?)
     }
 
-    async fn get_node_firmware_inventory(
-        &self,
-        cmd: rms::GetNodeFirmwareInventoryRequest,
-    ) -> Result<rms::GetNodeFirmwareInventoryResponse, RackManagerError> {
-        Ok(self.client.get_node_firmware_inventory(cmd).await?)
-    }
-
     async fn batch_get_firmware_inventory(
         &self,
         cmd: rms::BatchGetFirmwareInventoryRequest,
@@ -526,27 +475,6 @@ impl RmsApi for RackManagerApi {
         cmd: rms::CompareFirmwareObjectRequest,
     ) -> Result<rms::CompareFirmwareObjectResponse, RackManagerError> {
         Ok(self.client.compare_firmware_object(cmd).await?)
-    }
-
-    async fn get_rack_firmware_inventory(
-        &self,
-        cmd: rms::GetRackFirmwareInventoryRequest,
-    ) -> Result<rms::GetRackFirmwareInventoryResponse, RackManagerError> {
-        Ok(self.client.get_rack_firmware_inventory(cmd).await?)
-    }
-
-    async fn update_firmware(
-        &self,
-        cmd: rms::UpdateFirmwareRequest,
-    ) -> Result<rms::UpdateFirmwareResponse, RackManagerError> {
-        Ok(self.client.update_firmware(cmd).await?)
-    }
-
-    async fn batch_update_firmware_by_node_type(
-        &self,
-        cmd: rms::BatchUpdateFirmwareByNodeTypeRequest,
-    ) -> Result<rms::BatchUpdateFirmwareByNodeTypeResponse, RackManagerError> {
-        Ok(self.client.batch_update_firmware_by_node_type(cmd).await?)
     }
 
     async fn batch_update_firmware(

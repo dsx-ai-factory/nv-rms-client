@@ -339,22 +339,10 @@ service RackManager {
    *-------------------------------------------------------------------------*/
 
   /*
-   * SetPowerState controls the power state of a single node.
-   * Supports power on, power off, and power reset operations.
-   */
-  rpc SetPowerState(SetPowerStateRequest) returns (SetPowerStateResponse) {}
-
-  /*
    * BatchSetPowerState controls power for caller-supplied nodes without
    * requiring them to be registered in RMS inventory.
    */
   rpc BatchSetPowerState(BatchSetPowerStateRequest) returns (BatchSetPowerStateResponse) {}
-
-  /*
-   * GetPowerState retrieves the current power state of a node.
-   * Returns the current state (ON, OFF, or UNKNOWN).
-   */
-  rpc GetPowerState(GetPowerStateRequest) returns (GetPowerStateResponse) {}
 
   /*
    * BatchGetPowerState retrieves the current power state for caller-supplied
@@ -390,12 +378,6 @@ service RackManager {
    *-------------------------------------------------------------------------*/
 
   /*
-   * GetNodeFirmwareInventory retrieves all firmware component information for a node.
-   * Returns version, update status, and health for each firmware component.
-   */
-  rpc GetNodeFirmwareInventory(GetNodeFirmwareInventoryRequest) returns (GetNodeFirmwareInventoryResponse) {}
-
-  /*
    * BatchGetFirmwareInventory retrieves firmware information for caller-
    * supplied nodes without requiring them to be registered in RMS.
    */
@@ -407,20 +389,6 @@ service RackManager {
    * read-only and does not download firmware artifacts or start update jobs.
    */
   rpc CompareFirmwareObject(CompareFirmwareObjectRequest) returns (CompareFirmwareObjectResponse) {}
-
-  /*
-   * UpdateFirmware initiates a firmware update on a specific node asynchronously.
-   * Returns a job ID immediately. Use GetFirmwareJobStatus to track progress.
-   * Works for all node types (compute, powershelf, switch).
-   */
-  rpc UpdateFirmware(UpdateFirmwareRequest) returns (UpdateFirmwareResponse) {}
-
-  /*
-   * BatchUpdateFirmwareByNodeType initiates firmware updates on all nodes of a specific
-   * type in a rack asynchronously. Returns a parent job ID for tracking overall batch status,
-   * along with individual node job IDs. Use GetFirmwareJobStatus to track progress.
-   */
-  rpc BatchUpdateFirmwareByNodeType(BatchUpdateFirmwareByNodeTypeRequest) returns (BatchUpdateFirmwareByNodeTypeResponse) {}
 
   /*
    * BatchUpdateFirmware initiates firmware updates on a specified list of nodes
@@ -439,12 +407,6 @@ service RackManager {
    * node job IDs. Use GetSwitchSystemImageJobStatus to track progress.
    */
   rpc UpdateSwitchSystemImage(UpdateSwitchSystemImageRequest) returns (UpdateSwitchSystemImageResponse) {}
-
-  /*
-   * GetRackFirmwareInventory retrieves firmware information for all nodes in a rack.
-   * Provides a comprehensive view of firmware versions across the rack.
-   */
-  rpc GetRackFirmwareInventory(GetRackFirmwareInventoryRequest) returns (GetRackFirmwareInventoryResponse) {}
 
   /*
    * AddFirmwareObject adds a firmware object catalog entry.
