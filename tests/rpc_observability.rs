@@ -22,7 +22,9 @@ use std::time::{Duration, SystemTime};
 use http_body_util::{BodyExt, Full};
 use hyper::body::{Bytes, Incoming};
 use hyper_util::rt::{TokioExecutor, TokioIo};
-use librms::client::{RetryConfig, RmsApiConfig, RmsTransportLayer, TransportService};
+use librms::client::{
+    RetryConfig, RmsApiConfig, RmsTlsClient, RmsTransportLayer, TransportService,
+};
 use librms::client_config::RmsClientConfig;
 use librms::protos::rack_manager as rms;
 use librms::protos::rack_manager_v2 as rms_v2;
@@ -481,5 +483,110 @@ async fn observer_errors_never_affect_the_rpc() {
         let expected_finishes = if fail_start { 0 } else { 1 };
         assert_eq!(failing.finishes.load(Ordering::SeqCst), expected_finishes);
     }
+    server.abort();
+}
+
+#[tokio::test]
+async fn idle_connection_preserves_rpc_timeout_and_is_evicted() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+
+    // Accept one connection so both RPCs must reuse the same socket.
+    let mut server = tokio::spawn(async move {
+        let (socket, _) = listener.accept().await.unwrap();
+
+        let service = hyper::service::service_fn(|request: hyper::Request<Incoming>| async move {
+            request.into_body().collect().await.unwrap();
+            tokio::time::sleep(Duration::from_millis(350)).await;
+            Ok::<_, Infallible>(grpc_response(rms::GetVersionResponse::default()))
+        });
+
+        let _ = hyper::server::conn::http2::Builder::new(TokioExecutor::new())
+            .serve_connection(TokioIo::new(socket), service)
+            .await;
+    });
+
+    let config = RmsClientConfig {
+        connect_timeout: Some(Duration::from_millis(500)),
+        ..Default::default()
+    };
+
+    let mut client = RmsTlsClient::new(&config).build_rms_client(url).unwrap();
+
+    client.get_version(rms::GetVersionRequest {}).await.unwrap();
+    tokio::time::sleep(Duration::from_millis(300)).await;
+
+    let response = tokio::time::timeout(
+        Duration::from_secs(2),
+        client.get_version(rms::GetVersionRequest {}),
+    )
+    .await;
+
+    assert!(response.unwrap().is_ok());
+
+    // Verify retention before the pool's 90-second expiry, then cleanup after it.
+    tokio::time::pause();
+    tokio::time::advance(Duration::from_secs(88)).await;
+    tokio::time::resume();
+
+    assert!(
+        tokio::time::timeout(Duration::from_millis(20), &mut server)
+            .await
+            .is_err(),
+        "idle connection must remain open before the pool timeout"
+    );
+
+    tokio::time::pause();
+    tokio::time::advance(Duration::from_secs(3)).await;
+    tokio::time::resume();
+
+    let closed = tokio::time::timeout(Duration::from_secs(2), &mut server).await;
+
+    server.abort();
+
+    closed
+        .expect("unused connection must be evicted without another RPC")
+        .unwrap();
+}
+
+#[tokio::test]
+async fn readiness_probe_respects_the_configured_timeout() {
+    let (url, server) = spawn_server(true).await;
+
+    for connect_timeout in [Some(Duration::from_millis(50)), None] {
+        let config = RmsClientConfig {
+            connect_timeout,
+            ..Default::default()
+        };
+
+        let api_config = RmsApiConfig::new(&url, &config).with_retry_config(RetryConfig {
+            retries: 0,
+            interval: Duration::ZERO,
+        });
+
+        let started = tokio::time::Instant::now();
+
+        let result = tokio::time::timeout(
+            Duration::from_millis(200),
+            RmsTlsClient::retry_build_rms(&api_config),
+        )
+        .await;
+
+        if let Some(timeout) = connect_timeout {
+            assert!(
+                matches!(&result, Ok(Err(librms::RmsTlsClientError::Connection(_)))),
+                "Unexpected readiness result: {:?}",
+                result.as_ref().map(|value| value.as_ref().map(|_| ()))
+            );
+
+            assert!(started.elapsed() >= timeout);
+        } else {
+            assert!(
+                result.is_err(),
+                "None must leave readiness without a deadline"
+            );
+        }
+    }
+
     server.abort();
 }
