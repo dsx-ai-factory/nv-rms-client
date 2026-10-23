@@ -100,19 +100,19 @@ All pull requests are automatically checked for DCO compliance via DCO bot. Pull
 
 ## Fork and Setup
 
-Developers must first fork the upstream [NVIDIA Rack Management Service Client repository](https://github.com/NVIDIA/nv-rms-client).
+Developers must first fork the upstream [NVIDIA Rack Management Service Client repository](https://github.com/dsx-ai-factory/nv-rms-client).
 
 ### 1. Fork the Repository
 
-1. Navigate to the [NVIDIA Rack Management Service Client repository](https://github.com/NVIDIA/nv-rms-client) on GitHub.
+1. Navigate to the [NVIDIA Rack Management Service Client repository](https://github.com/dsx-ai-factory/nv-rms-client) on GitHub.
 2. Click the **Fork** button in the upper right corner.
 3. Select your GitHub account as the destination.
 
 ### 2. Clone Your Fork
 
 ```bash
-git clone https://github.com/<your-username>/local-rms-client.git
-cd local-rms-client
+git clone https://github.com/<your-username>/nv-rms-client.git
+cd nv-rms-client
 ```
 
 ### 3. Add Upstream Remote
@@ -120,7 +120,7 @@ cd local-rms-client
 Add the original repository as an upstream remote to keep your fork in sync:
 
 ```bash
-git remote add upstream https://github.com/NVIDIA/nv-rms-client.git
+git remote add upstream https://github.com/dsx-ai-factory/nv-rms-client.git
 git remote -v  # Verify remotes
 ```
 
@@ -156,6 +156,10 @@ Use descriptive branch names like:
 - `docs/update-readme`
 
 ## Contribution Process
+
+Install the build tools listed in the [README prerequisites](README.md#prerequisites).
+Run the [feature test matrix](README.md#testing) and generate the API reference
+with `cargo doc --all-features --no-deps` before submitting protobuf or API changes.
 
 1. **Fork the repository** and create your branch from `main`.
 2. **Make your changes** following our coding guidelines.
