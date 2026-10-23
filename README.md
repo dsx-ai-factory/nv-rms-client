@@ -18,6 +18,12 @@ not run an RMS service or manage hardware on its own.
 The NVIDIA Rack Management Service provides functionality for managing NVIDIA
 multi-node NVLINK rack-scale hardware.
 
+[`nv-rms`](https://github.com/dsx-ai-factory/nv-rms) implements the RMS server
+and uses `librms` for shared protobuf messages and generated gRPC server
+definitions. Rust applications use this crate's `client` feature to call that
+server over gRPC with TLS and readiness retry support. The server performs the
+hardware operations; `librms` provides the Rust API and transport for callers.
+
 ## Features
 
 - `client`: generated client APIs plus the TLS, retry, and transport stack.
@@ -156,6 +162,12 @@ required certificate inputs are absent. Do not use that fallback for a productio
 connection that requires verified mTLS.
 
 ## Architecture and API reference
+
+Use the [full NVIDIA RMS documentation](https://docs.nvidia.com/rms/) for service
+setup, deployment, and configuration. Its
+[operations guide](https://docs.nvidia.com/rms/documentation/operations/overview/)
+describes RPC behavior and the asynchronous job model. Generate the Rust API
+reference for your crate revision with the `cargo doc` command below.
 
 The build and API layers are:
 
