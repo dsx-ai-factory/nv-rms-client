@@ -432,6 +432,32 @@ pub trait RmsApi: Send + Sync + 'static {
         cmd: rms::BatchSetScaleUpFabricStateRequest,
     ) -> Result<rms::BatchSetScaleUpFabricStateResponse, RackManagerError>;
 
+    /// Sets and saves explicit administrative link states on each supplied switch.
+    ///
+    /// Implementors may omit this method; the default returns `Unimplemented`.
+    async fn batch_set_scale_up_fabric_link_config(
+        &self,
+        _cmd: rms::BatchSetScaleUpFabricLinkConfigRequest,
+    ) -> Result<rms::BatchSetScaleUpFabricLinkConfigResponse, RackManagerError> {
+        Err(tonic::Status::unimplemented(
+            "BatchSetScaleUpFabricLinkConfig is not implemented by this RmsApi",
+        )
+        .into())
+    }
+
+    /// Reads effective administrative link states without changing switch configuration.
+    ///
+    /// Implementors may omit this method; the default returns `Unimplemented`.
+    async fn batch_get_scale_up_fabric_link_config(
+        &self,
+        _cmd: rms::BatchGetScaleUpFabricLinkConfigRequest,
+    ) -> Result<rms::BatchGetScaleUpFabricLinkConfigResponse, RackManagerError> {
+        Err(tonic::Status::unimplemented(
+            "BatchGetScaleUpFabricLinkConfig is not implemented by this RmsApi",
+        )
+        .into())
+    }
+
     async fn batch_get_scale_up_fabric_service_status(
         &self,
         cmd: rms::BatchGetScaleUpFabricServiceStatusRequest,
@@ -795,6 +821,26 @@ impl RmsApi for RackManagerApi {
         cmd: rms::BatchSetScaleUpFabricStateRequest,
     ) -> Result<rms::BatchSetScaleUpFabricStateResponse, RackManagerError> {
         Ok(self.client.batch_set_scale_up_fabric_state(cmd).await?)
+    }
+
+    async fn batch_set_scale_up_fabric_link_config(
+        &self,
+        cmd: rms::BatchSetScaleUpFabricLinkConfigRequest,
+    ) -> Result<rms::BatchSetScaleUpFabricLinkConfigResponse, RackManagerError> {
+        Ok(self
+            .client
+            .batch_set_scale_up_fabric_link_config(cmd)
+            .await?)
+    }
+
+    async fn batch_get_scale_up_fabric_link_config(
+        &self,
+        cmd: rms::BatchGetScaleUpFabricLinkConfigRequest,
+    ) -> Result<rms::BatchGetScaleUpFabricLinkConfigResponse, RackManagerError> {
+        Ok(self
+            .client
+            .batch_get_scale_up_fabric_link_config(cmd)
+            .await?)
     }
 
     async fn batch_get_scale_up_fabric_service_status(
