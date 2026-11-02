@@ -125,6 +125,14 @@ enum FirmwareJobState {
   FIRMWARE_JOB_STATE_FAILED = 4; // Job finished with an error
 }
 
+// Indicates whether artifact preparation is in progress, ready, failed, interrupted, or unspecified.
+enum FirmwareObjectPreparationState {
+  UNSPECIFIED = 0;
+  PREPARING = 1;
+  READY = 2;
+  FAILED = 3;
+}
+
 // JobExecutionState represents the lifecycle state of an asynchronous job
 enum JobExecutionState {
   JOB_EXECUTION_STATE_UNSPECIFIED = 0; // Server left the job state unset or at the proto3 default
@@ -1087,12 +1095,24 @@ message FirmwareObject {
   // Hardware class this object applies to. Defaults are scoped by this value.
   string hardware_type = 7;
   bool is_default = 8;
+  FirmwareObjectArtifactStatus artifact_status = 9;
 }
 
 // FirmwareObjectMetadata describes the firmware object content RMS can apply.
 message FirmwareObjectMetadata {
   repeated FirmwareObjectDeviceComponents device_components = 1;
   repeated FirmwareObjectSwitchSystemImage switch_system_images = 2;
+}
+
+// Reports the total and successfully downloaded artifact counts, overall preparation state, and any current errors
+message FirmwareObjectArtifactStatus {
+  FirmwareObjectPreparationState state = 1;
+  // Number of eligible downloadable artifact references.
+  uint32 total_artifacts = 2;
+  // Number successfully downloaded, validated, and cached.
+  uint32 downloaded_artifacts = 3;
+  // Current preparation errors; empty when none.
+  string error_summary = 4;
 }
 
 // FirmwareObjectDeviceComponents groups applyable components by hardware node type.
