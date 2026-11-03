@@ -928,6 +928,8 @@ message FirmwareManifestComponentComparison {
   string target = 6; // Matching Redfish or logical firmware target
   string reason = 7; // Human-readable explanation for non-matched results
   string sku_id = 8; // Optional manifest SKU used to disambiguate fungible components
+  string inventory_path = 9; // Exact installed Redfish inventory URI or host device path; not a flash target
+  string bundle = 10; // Parent manifest component (e.g. BMC or HMC), separate from the installed instance
 }
 
 // NodeFirmwareManifestComparison contains the comparison result for one node.
@@ -950,6 +952,13 @@ message CompareFirmwareObjectRequest {
   // Descriptor filters are resolved to node types and supplement component_filters.
   // A component_filters entry wins when both selectors resolve to the same node type.
   repeated NodeDescriptorFirmwareObjectComponentFilter node_descriptor_component_filters = 5;
+  // Exactly one of config_json or object_id is required. Stored objects need not
+  // have downloaded artifacts: comparison reads metadata only.
+  string object_id = 6;
+  // Optional exact manifest component names, inventory IDs, or full inventory
+  // URIs. Case-insensitive; no substring matching. Applied within the package
+  // selection above. Every selector must match, or the node comparison fails.
+  repeated string inventory_components = 7;
 }
 
 // CompareFirmwareObjectResponse reports comparison and per-node query results.
