@@ -634,6 +634,24 @@ service RackManager {
   rpc BatchSetScaleUpFabricState(BatchSetScaleUpFabricStateRequest) returns (BatchSetScaleUpFabricStateResponse) {}
 
   /*
+   * BatchSetScaleUpFabricLinkConfig synchronously sets and saves administrative
+   * link states on caller-supplied switches. Only selected interfaces' applied
+   * link states change. Saving persists the switch's complete applied configuration,
+   * including any unsaved changes outside the selected interfaces.
+   * Each switch uses at most 1 configuration revision and succeeds or fails
+   * independently. Matching applied and saved settings require no writes.
+   */
+  rpc BatchSetScaleUpFabricLinkConfig(BatchSetScaleUpFabricLinkConfigRequest) returns (BatchSetScaleUpFabricLinkConfigResponse) {}
+
+  /*
+   * BatchGetScaleUpFabricLinkConfig synchronously reads effective administrative
+   * states for all supported fabric link interfaces on each supplied switch.
+   * Callers do not provide interface IDs. No configuration is changed.
+   * Administrative state does not establish operational connectivity or health.
+   */
+  rpc BatchGetScaleUpFabricLinkConfig(BatchGetScaleUpFabricLinkConfigRequest) returns (BatchGetScaleUpFabricLinkConfigResponse) {}
+
+  /*
    * BatchGetScaleUpFabricServiceStatus retrieves cluster health and fabric-manager status
    * for a caller-supplied list of switches using switch Rest APIs.
    */
@@ -1506,6 +1524,80 @@ message BatchSetScaleUpFabricStateRequest {
 // BatchSetScaleUpFabricStateResponse reports the synchronous per-switch result.
 message BatchSetScaleUpFabricStateResponse {
   NodeBatchResponse response = 1; // response.job_id is unused and left empty for this synchronous RPC
+}
+
+// Administrative state requested for a link or reported by a switch.
+enum ScaleUpFabricLinkState {
+  SCALE_UP_FABRIC_LINK_STATE_UNSPECIFIED = 0; // Administrative state is unknown; invalid in set requests.
+  SCALE_UP_FABRIC_LINK_STATE_UP = 1; // Link is administratively enabled.
+  SCALE_UP_FABRIC_LINK_STATE_DOWN = 2; // Link is administratively disabled.
+}
+
+// Applies the same administrative state to a list of interfaces on one switch.
+message ScaleUpFabricLinkConfig {
+  // Supply at least 1 exact interface name supported by the target switch.
+  // BatchGetScaleUpFabricLinkConfig returns these names in interface_id.
+  // Empty names and range expressions are invalid.
+  repeated string interface_ids = 1;
+
+  // Administrative state to apply to every interface in interface_ids.
+  // Must be UP or DOWN; UNSPECIFIED and unrecognized values are invalid.
+  ScaleUpFabricLinkState state = 2;
+}
+
+// Desired link settings for one switch. Unselected applied link states remain unchanged.
+message ScaleUpFabricSwitchLinkConfig {
+  NodeInfo node = 1; // Required target switch identity and direct connection information.
+
+  // Supply at least 1 entry. Use separate entries for different states.
+  // Each interface name may appear only once, within an entry or across entries
+  // for this switch, even when the requested states match.
+  repeated ScaleUpFabricLinkConfig links = 2;
+}
+
+// Sets link states independently on each supplied switch.
+message BatchSetScaleUpFabricLinkConfigRequest {
+  // At least 1 switch, with unique node IDs. Each entry supplies that switch's
+  // connection information and link settings; settings may differ between switches.
+  repeated ScaleUpFabricSwitchLinkConfig switches = 1;
+
+  // Switch certificate domain; uses the server's configured default when absent.
+  optional string domain = 2;
+}
+
+// Synchronous aggregate and per-switch results. Successful changes are saved.
+message BatchSetScaleUpFabricLinkConfigResponse {
+  NodeBatchResponse response = 1; // response.job_id is unused and left empty.
+}
+
+// Reports the administrative state currently applied to a link interface.
+message ScaleUpFabricLinkStatus {
+  // Exact switch interface name. Use this value in
+  // ScaleUpFabricLinkConfig.interface_ids to change its administrative state.
+  string interface_id = 1;
+  ScaleUpFabricLinkState state = 2; // UNSPECIFIED means the state could not be determined.
+}
+
+// All supported fabric link interfaces on one switch, in deterministic order.
+message ScaleUpFabricSwitchLinkStatus {
+  string node_id = 1; // Caller-supplied switch node ID.
+  repeated ScaleUpFabricLinkStatus links = 2;
+}
+
+// Reads all supported fabric links from each supplied switch; no link selection is needed.
+message BatchGetScaleUpFabricLinkConfigRequest {
+  NodeSet nodes = 1; // Nonempty switch inventory with unique node IDs.
+
+  // Switch certificate domain; uses the server's configured default when absent.
+  optional string domain = 2;
+}
+
+// Reports per-switch read results and successfully collected link states.
+message BatchGetScaleUpFabricLinkConfigResponse {
+  NodeBatchResponse response = 1; // Per-switch read results; response.job_id is empty.
+
+  // Successfully read switches; failed reads appear only in response.node_results.
+  repeated ScaleUpFabricSwitchLinkStatus switch_statuses = 2;
 }
 
 // ScaleUpFabricServiceStatusEntry stores per-switch status keyed by node_id.
