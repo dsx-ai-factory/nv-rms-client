@@ -125,7 +125,7 @@ enum FirmwareJobState {
   FIRMWARE_JOB_STATE_FAILED = 4; // Job finished with an error
 }
 
-// Indicates whether artifact preparation is in progress, ready, failed, interrupted, or unspecified.
+// Indicates whether artifact preparation is in progress, ready, failed, or unspecified.
 enum FirmwareObjectPreparationState {
   UNSPECIFIED = 0;
   PREPARING = 1;
