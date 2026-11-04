@@ -27,10 +27,16 @@ const FABRIC_SERDE_FIELD_ATTRIBUTES: &[(&str, &[&str])] = &[
     (
         r#"#[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "Vec::is_empty"))]"#,
         &[
+            "rack_manager.ScaleUpFabricInspectionObservation.nodes",
+            "rack_manager.ScaleUpFabricInspectionObservation.unassociated_devices",
             "rack_manager_v2.ConfigureScaleUpFabricManagerResponse.selected_fabrics",
             "rack_manager_v2.ScaleUpFabricMembers.compute_node_ids",
             "rack_manager_v2.ScaleUpFabricMembers.switch_node_ids",
         ],
+    ),
+    (
+        r#"#[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "String::is_empty"))]"#,
+        &["rack_manager.ScaleUpFabricInspectionObservation.status_reason"],
     ),
 ];
 
@@ -62,6 +68,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .type_attribute(
             ".rack_manager_v2",
             "#[cfg_attr(feature = \"serde\", derive(serde::Deserialize, serde::Serialize))]",
+        )
+        .type_attribute(
+            "rack_manager.ScaleUpFabricNodeObservation",
+            "#[cfg_attr(feature = \"serde\", serde(default))]",
+        )
+        .type_attribute(
+            "rack_manager.ScaleUpFabricDeviceObservation",
+            "#[cfg_attr(feature = \"serde\", serde(default))]",
+        )
+        .type_attribute(
+            "rack_manager.ScaleUpFabricPortObservation",
+            "#[cfg_attr(feature = \"serde\", serde(default))]",
         )
         // Preserve the serialized shape for callers that do not use the additive field.
         .field_attribute(
