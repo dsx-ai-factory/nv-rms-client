@@ -24,6 +24,19 @@ definitions. Rust applications use this crate's `client` feature to call that
 server over gRPC with TLS and readiness retry support. The server performs the
 hardware operations; `librms` provides the Rust API and transport for callers.
 
+## Firmware object comparison
+
+`CompareFirmwareObject` accepts either an inline `config_json` SOT or a stored
+`object_id`, together with caller-supplied nodes. The server reads versions without
+updating devices or downloading firmware. Optional `inventory_components` selectors
+choose exact manifest names, inventory IDs, or inventory paths within the package
+filters. Descriptor filters provide readable node identity attributes without
+numeric map keys. Results contain individual installed instances, with
+`inventory_path` and parent `bundle` separate from the package's update `target`.
+Missing or ambiguous evidence is not a match. These additive fields require a
+server implementing the corresponding comparison changes; older servers ignore
+unknown fields and do not support stored-object comparison.
+
 ## Features
 
 - `client`: generated client APIs plus the TLS, retry, and transport stack.

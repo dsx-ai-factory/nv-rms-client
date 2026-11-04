@@ -63,7 +63,31 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             ".rack_manager_v2",
             "#[cfg_attr(feature = \"serde\", derive(serde::Deserialize, serde::Serialize))]",
         )
+        .type_attribute(
+            ".rack_manager.PLDMComparisonDetails",
+            "#[cfg_attr(feature = \"serde\", serde(default))]",
+        )
+        .type_attribute(
+            ".rack_manager.PLDMComponentComparison",
+            "#[cfg_attr(feature = \"serde\", serde(default))]",
+        )
         // Preserve the serialized shape for callers that do not use the additive field.
+        .field_attribute(
+            "rack_manager.CompareFirmwareObjectRequest.object_id",
+            "#[cfg_attr(feature = \"serde\", serde(default, skip_serializing_if = \"String::is_empty\"))]",
+        )
+        .field_attribute(
+            "rack_manager.CompareFirmwareObjectRequest.inventory_components",
+            "#[cfg_attr(feature = \"serde\", serde(default, skip_serializing_if = \"Vec::is_empty\"))]",
+        )
+        .field_attribute(
+            "rack_manager.FirmwareManifestComponentComparison.inventory_path",
+            "#[cfg_attr(feature = \"serde\", serde(default, skip_serializing_if = \"String::is_empty\"))]",
+        )
+        .field_attribute(
+            "rack_manager.FirmwareManifestComponentComparison.bundle",
+            "#[cfg_attr(feature = \"serde\", serde(default, skip_serializing_if = \"String::is_empty\"))]",
+        )
         .field_attribute(
             "rack_manager.NodeInfo.additional_host_endpoints",
             "#[cfg_attr(feature = \"serde\", serde(default, skip_serializing_if = \"Vec::is_empty\"))]",
