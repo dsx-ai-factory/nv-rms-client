@@ -63,6 +63,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             ".rack_manager_v2",
             "#[cfg_attr(feature = \"serde\", derive(serde::Deserialize, serde::Serialize))]",
         )
+        .type_attribute(
+            ".rack_manager.PLDMComparisonDetails",
+            "#[cfg_attr(feature = \"serde\", serde(default))]",
+        )
+        .type_attribute(
+            ".rack_manager.PLDMComponentComparison",
+            "#[cfg_attr(feature = \"serde\", serde(default))]",
+        )
         // Preserve the serialized shape for callers that do not use the additive field.
         .field_attribute(
             "rack_manager.CompareFirmwareObjectRequest.object_id",

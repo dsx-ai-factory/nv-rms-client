@@ -458,6 +458,10 @@ service RackManager {
    */
   rpc CompareFirmwareObject(CompareFirmwareObjectRequest) returns (CompareFirmwareObjectResponse) {}
 
+  // Compare live inventory with the PLDM packages selected by a firmware object.
+  // Downloads/reads packages but never flashes firmware or activates a device.
+  rpc CompareFirmwareObjectByPLDM(CompareFirmwareObjectByPLDMRequest) returns (CompareFirmwareObjectByPLDMResponse) {}
+
   /*
    * UpdateFirmware initiates a firmware update on a specific node asynchronously.
    * Returns a job ID immediately. Use GetFirmwareJobStatus to track progress.
@@ -967,6 +971,63 @@ message CompareFirmwareObjectResponse {
   string object_id = 2;
   bool matches_manifest = 3; // True only when every requested node succeeds and fully matches
   repeated NodeFirmwareManifestComparison nodes = 4;
+}
+
+// Exactly one of config_json or object_id is required. The manifest selects
+// packages only: expected versions come from their PLDM metadata, not SOT versions.
+message CompareFirmwareObjectByPLDMRequest {
+  string config_json = 1;
+  string firmware_type = 2; // Channel; omitted uses the manifest default
+  NodeSet nodes = 3; // Same node type/descriptor resolution as CompareFirmwareObject
+  map<int32, FirmwareObjectComponentFilter> component_filters = 4;
+  // Supplements component_filters; an enum-keyed filter wins for the same node type.
+  repeated NodeDescriptorFirmwareObjectComponentFilter node_descriptor_component_filters = 5;
+  string object_id = 6;
+}
+
+// Native package comparison row. Inventory drives the rows; package components
+// absent from inventory are not necessarily reported. No update target is inferred.
+message PLDMComponentComparison {
+  string name = 1;
+  string inventory_path = 2;
+  string system_version = 3;
+  string package_version = 4;
+  string status = 5; // Native values: matched, mismatched, unverified
+  string reason = 6;
+}
+
+message PLDMPackageParseError {
+  string firmware_file = 1;
+  string message = 2;
+}
+
+// Structured native NVFWUPD details, not a JSON-encoded string.
+message PLDMComparisonDetails {
+  string status = 1; // matched, mismatch, or unverified
+  bool all_targets_matched = 2;
+  string reason = 3;
+  repeated string packages = 4;
+  repeated PLDMPackageParseError package_parse_errors = 5;
+  uint32 comparable_components = 6;
+  repeated PLDMComponentComparison components = 7;
+  repeated PLDMComponentComparison mismatches = 8;
+}
+
+message NodePLDMComparison {
+  string node_id = 1;
+  // Native NVFWUPD semantics: no detected mismatches. May be true even when
+  // some/all rows are unverified; inspect details.all_targets_matched and rows.
+  bool matched = 2;
+  PLDMComparisonDetails details = 3;
+}
+
+message CompareFirmwareObjectByPLDMResponse {
+  NodeBatchResponse response = 1; // RPC execution success, not version compliance
+  string object_id = 2;
+  // All requested nodes succeeded and their native matched values are true.
+  // False for an empty node set. Does not assert complete package coverage.
+  bool matched = 3;
+  repeated NodePLDMComparison nodes = 4;
 }
 
 // FirmwareTarget pairs a firmware component target with its firmware package file.

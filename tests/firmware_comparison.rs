@@ -9,6 +9,27 @@ use librms::protos::rack_manager::{
 use prost::Message;
 
 #[test]
+fn pldm_comparison_has_structured_native_details_and_round_trips() {
+    use librms::protos::rack_manager::{CompareFirmwareObjectByPldmRequest, PldmComparisonDetails};
+    let request = CompareFirmwareObjectByPldmRequest {
+        object_id: "object".into(),
+        ..Default::default()
+    };
+    assert_eq!(
+        CompareFirmwareObjectByPldmRequest::decode(request.encode_to_vec().as_slice()).unwrap(),
+        request
+    );
+    let details: PldmComparisonDetails = serde_json::from_value(serde_json::json!({
+        "status":"matched", "all_targets_matched":false,
+        "components":[{"name":"GPU_0", "status":"unverified", "package_version":"N/A"}]
+    }))
+    .unwrap();
+    assert!(!details.all_targets_matched);
+    assert_eq!(details.components[0].status, "unverified");
+    assert!(serde_json::to_value(details).unwrap()["components"].is_array());
+}
+
+#[test]
 fn legacy_json_requests_and_results_keep_deserializing() {
     let request: CompareFirmwareObjectRequest = serde_json::from_value(serde_json::json!({
         "config_json":"{}", "firmware_type":"prod", "nodes":null,
