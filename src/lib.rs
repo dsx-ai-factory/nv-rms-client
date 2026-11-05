@@ -297,6 +297,63 @@ mod tests {
     use super::protos::{rack_manager as rms, rack_manager_v2 as rms_v2};
 
     #[test]
+    fn inspection_json_defaults_missing_evidence() -> Result<(), serde_json::Error> {
+        let legacy = serde_json::json!({
+            "switch_node_ids": ["switch-a"], "compute_node_ids": [],
+            "primary_switch_node_id": "switch-a", "status": 1,
+            "control_plane_state": 1, "inspection_errors": []
+        });
+
+        let observed: rms::ScaleUpFabricInspectionObservation =
+            serde_json::from_value(legacy.clone())?;
+
+        assert!(observed.nodes.is_empty());
+        assert!(observed.unassociated_devices.is_empty());
+        assert!(observed.status_reason.is_empty());
+        assert_eq!(serde_json::to_value(observed)?, legacy);
+
+        let mut detailed = legacy;
+
+        detailed["nodes"] = serde_json::json!([{
+            "node_id": "switch-a", "devices": [{
+                "device_id": "device-a", "ports": [{"port_number": 0, "physical_state": "909"}]
+            }]
+        }]);
+
+        detailed["unassociated_devices"] = serde_json::json!([{"device_id": "gpu-a", "kind": 1}]);
+
+        let observed: rms::ScaleUpFabricInspectionObservation = serde_json::from_value(detailed)?;
+
+        let node = observed.nodes.first().expect("supplied node observation");
+
+        assert_eq!(node.node_id, "switch-a");
+        assert_eq!(node.status(), rms::ScaleUpFabricReportedStatus::Unknown);
+
+        let device = node.devices.first().expect("supplied device observation");
+
+        let port = device.ports.first().expect("supplied port observation");
+
+        assert_eq!(port.port_number, Some(0));
+        assert_eq!(port.peer_port_number, None);
+        assert_eq!(port.physical_state, "909");
+        assert!(port.administrative_state.is_empty());
+
+        let unassociated = observed
+            .unassociated_devices
+            .first()
+            .expect("supplied unassociated device");
+
+        assert_eq!(unassociated.device_id, "gpu-a");
+
+        let round_trip: rms::ScaleUpFabricInspectionObservation =
+            serde_json::from_value(serde_json::to_value(&observed)?)?;
+
+        assert_eq!(round_trip, observed);
+
+        Ok(())
+    }
+
+    #[test]
     fn factory_reset_ssh_fallback_defaults_to_disabled_in_json() -> Result<(), serde_json::Error> {
         let request: rms::BatchResetSwitchFactoryDefaultRequest = serde_json::from_str("{}")?;
 

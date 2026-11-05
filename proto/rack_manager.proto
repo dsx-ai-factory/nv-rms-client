@@ -1382,8 +1382,10 @@ message InspectScaleUpFabricsRequest {
   // one tray and needs bmc_endpoint and credentials to read chassis and tray positions.
   // RMS reads compute BMCs for discovery; it does not configure compute hosts.
   //
-  // Without compute entries, RMS cannot match observed computes to caller node IDs.
-  // Unresolved nodes are reported as collection errors rather than silently omitted.
+  // Compute entries are optional. Without them, RMS does not match GPU observations
+  // to caller node IDs. Those GPUs appear in each fabric's unassociated_devices;
+  // omitting compute entries is not an error. When compute entries are supplied,
+  // failed or ambiguous matches appear in inspection_errors or discovery_errors.
   NodeSet nodes = 1;
 
   // Selects the CA and RMS client credentials for all switches in this request.
@@ -1423,8 +1425,9 @@ message InspectScaleUpFabricsResponse {
 // These associations do not confirm that a requested layout was achieved;
 // compare the observed node IDs with the configuration response's selected_fabrics.
 message ScaleUpFabricInspectionObservation {
-  // Caller node IDs resolved from live topology and discovered physical identities.
-  // Lists are sorted and deduplicated; inspection_errors explain unresolved associations.
+  // Caller node IDs matched using live topology and discovered physical identities.
+  // Lists are sorted and deduplicated. inspection_errors explain failed or ambiguous
+  // matches. compute_node_ids is empty when no compute entries were supplied.
   repeated string switch_node_ids = 1;
   repeated string compute_node_ids = 2;
   string primary_switch_node_id = 3; // Switch whose enabled controller was inspected.
@@ -1439,6 +1442,106 @@ message ScaleUpFabricInspectionObservation {
 
   // Failed reads and interpretation errors, not successfully observed ABNORMAL states.
   repeated ScaleUpFabricInspectionError inspection_errors = 7;
+
+  // Observations grouped by caller node ID, with 1 entry per matched node.
+  // Each entry contains the node's GPUs or switch ASICs and their ports.
+  // Older servers or failed reads may omit entries, so an empty list does not
+  // prove that no nodes exist. These are observed nodes, not expected inventory.
+  repeated ScaleUpFabricNodeObservation nodes = 8;
+
+  // Explanation of status, including controller or node conditions that have no
+  // device observation. Text is not a stable code. Empty means no explanation
+  // was supplied, not that the fabric is NORMAL.
+  string status_reason = 9;
+
+  // Devices not matched to a caller node, including GPUs when compute entries
+  // were omitted. Each device appears here or under nodes, not both.
+  // Device and port observations are retained when no node match is available.
+  repeated ScaleUpFabricDeviceObservation unassociated_devices = 10;
+}
+
+// One caller-supplied compute or switch node observed in this fabric.
+message ScaleUpFabricNodeObservation {
+  // Nonempty node ID from the request, also listed in compute_node_ids or
+  // switch_node_ids. Device IDs are not substituted for caller node IDs.
+  string node_id = 1;
+
+  // Combined status of this node, its devices, and ports counted in link status.
+  // ABNORMAL takes precedence over UNKNOWN, then NORMAL. Without evidence, status
+  // is UNKNOWN. Excluded ports do not contribute. No communication or bandwidth
+  // test is performed.
+  ScaleUpFabricReportedStatus status = 2;
+
+  // Explanation of status, such as a reported fault or missing data.
+  // Text is not a stable code. Empty does not mean that the node is NORMAL.
+  string status_reason = 3;
+
+  // GPUs or switch ASICs matched to this node. A node can contain multiple devices;
+  // an empty list does not prove that the node has no devices.
+  repeated ScaleUpFabricDeviceObservation devices = 4;
+}
+
+// Device category within the controller's topology, not the caller node's type.
+enum ScaleUpFabricDeviceKind {
+  SCALE_UP_FABRIC_DEVICE_KIND_UNKNOWN = 0; // Device category was not established.
+  SCALE_UP_FABRIC_DEVICE_KIND_GPU = 1; // An individual GPU.
+  SCALE_UP_FABRIC_DEVICE_KIND_SWITCH = 2; // An individual switch ASIC.
+}
+
+// One controller-reported device. Multiple devices can belong to the same node.
+// Observed faults belong in status and status_reason, not inspection_errors.
+message ScaleUpFabricDeviceObservation {
+  // Opaque controller-reported ID scoped to this fabric observation. Empty when
+  // unavailable; not a caller node ID, management address, or NVUE interface name.
+  string device_id = 1;
+
+  ScaleUpFabricDeviceKind kind = 2;
+
+  // Sampled device status. Node and port indicators are reported separately;
+  // all applicable indicators contribute to the parent node's status.
+  ScaleUpFabricReportedStatus status = 3;
+
+  // Explanation of status, such as a reported fault or missing data.
+  // Text is not a stable code. Empty means no explanation was supplied.
+  string status_reason = 4;
+
+  // Ports reported for this device. An empty list does not prove that the device
+  // has no ports. Listed ports do not confirm complete physical connectivity.
+  repeated ScaleUpFabricPortObservation ports = 5;
+}
+
+// One device's port observation, not a verified end-to-end link.
+// Port-type and state strings contain the source enum label when recognized, or
+// its decimal number when unrecognized. Empty means no value was collected.
+// An UNKNOWN source label remains an unknown observation.
+message ScaleUpFabricPortObservation {
+  // Source-reported port number within the containing device, not its tray.
+  // Unset means unavailable; no translation to an NVUE interface name is implied.
+  optional uint64 port_number = 1;
+  string port_type = 2;
+  string administrative_state = 3;
+  string physical_state = 4;
+  string logical_state = 5;
+
+  // Reported peer's device_id in this fabric. Empty means unavailable, not
+  // disconnected. The peer need not have its own observation in a partial result.
+  string peer_device_id = 6;
+
+  // Reported number within the peer device. Unset means unavailable.
+  // A reported peer does not confirm that both endpoints agree on the connection.
+  optional uint64 peer_port_number = 7;
+
+  // Port indicator used by component_status.links when included_in_link_status is
+  // true. UNKNOWN when excluded; exclusion does not make fabric status UNKNOWN.
+  ScaleUpFabricReportedStatus status = 8;
+
+  // Explanation of status or why the port was excluded from link status.
+  // Text is not a stable code. Empty means no explanation was supplied.
+  string status_reason = 9;
+
+  // Whether this port contributes to component_status.links. Administratively DOWN
+  // ports and ports outside the scale-up data path are excluded but remain visible.
+  bool included_in_link_status = 10;
 }
 
 // ScaleUpFabricStatus reports the observed scale-up fabric configuration as read back
@@ -1484,7 +1587,7 @@ enum ScaleUpFabricReportedStatus {
 
 // Independently sampled NMX-C indicators for one observed fabric.
 // ABNORMAL takes precedence over UNKNOWN, then NORMAL. Empty evidence is UNKNOWN.
-// Individual raw device and port states are not included.
+// Supporting observations appear in nodes and unassociated_devices.
 message ScaleUpFabricComponentStatus {
   // Controller indicator from GetDomainStateInfo, independent of configuration state.
   ScaleUpFabricReportedStatus controller = 1;

@@ -407,8 +407,11 @@ pub trait RmsApi: Send + Sync + 'static {
         .into())
     }
 
-    /// Reads live fabric members, controller state, and sampled component status.
+    /// Reads live fabric members, controller state, and observations grouped by node.
     ///
+    /// Device and port details are grouped under the caller's node ID. Devices
+    /// without a matching caller node appear in `unassociated_devices`.
+    /// Compute entries are optional; without them, GPU observations have no caller node ID.
     /// Collection failures retain successful observations. A normal component
     /// status does not establish end-to-end connectivity or bandwidth.
     /// Implementors may omit this method; the default returns `Unimplemented`.
